@@ -1,0 +1,17 @@
+langchain  # Replace with the latest version
+langchain_community
+langchain_openai
+transformers
+coverage
+openai # Replace with the latest version
+python-dotenv==1.0.0
+mutmut
+cosmic-ray
+pandas
+jinja2
+streamlit
+agentic_ai
+autogen
+#mutmut
+mutpy
+pyyaml

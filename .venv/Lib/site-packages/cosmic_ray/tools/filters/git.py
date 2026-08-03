@@ -1,0 +1,112 @@
+"""A filter that uses git to determine when specific files/lines
+should be skipped.
+"""
+
+import logging
+import re
+import subprocess
+import sys
+from argparse import Namespace
+from collections import defaultdict
+from pathlib import Path
+
+from cosmic_ray.config import ConfigDict, load_config
+from cosmic_ray.tools.filters.filter_app import FilterApp
+from cosmic_ray.work_db import WorkDB
+from cosmic_ray.work_item import WorkResult, WorkerOutcome
+
+log = logging.getLogger()
+
+
+class GitFilter(FilterApp):
+    """Implements the git filter."""
+
+    def description(self):
+        return __doc__
+
+    def _git_news(self, branch):
+        """Get the set of new lines by file"""
+        # we could use interlap, but do not want to
+        # add new dependency at the moment
+        git_command = ["git", "diff", "--relative", "-U0", branch, "."]
+        log.info(f"Executing {' '.join(git_command)}")
+        try:
+            output = subprocess.check_output(git_command, stderr=subprocess.PIPE)
+        except subprocess.CalledProcessError as exc:
+            log.error(
+                "'git diff' call failed: %s\n[stdout]\n%s\n[stderr]\n%s",
+                exc,
+                exc.stdout.decode(errors="replace"),
+                exc.stderr.decode(errors="replace"),
+            )
+            raise
+
+        regex = re.compile(r"@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@.*")
+        current_file = None
+        res = defaultdict(set)
+        for diff_line in output.decode("utf-8", errors="replace").splitlines():
+            if diff_line.startswith("@@"):
+                m = regex.match(diff_line)
+                if m is None:
+                    continue
+                start = int(m.group(1))
+                length = int(m.group(2)) if m.group(2) is not None else 1
+                for line in range(start, start + length):
+                    res[current_file].add(line)
+            if diff_line.startswith("+++ b/"):
+                current_file = Path(diff_line[6:])
+        return res
+
+    def _skip_filtered(self, work_db, branch):
+        git_news = self._git_news(branch)
+
+        job_ids = []
+
+        for item in work_db.pending_work_items:
+            for mutation in item.mutations:
+                if mutation.module_path not in git_news or not (
+                    git_news[mutation.module_path] & set(range(mutation.start_pos[0], mutation.end_pos[0] + 1))
+                ):
+                    log.info(
+                        "git skipping %s %s %s %s %s %s",
+                        item.job_id,
+                        mutation.operator_name,
+                        mutation.occurrence,
+                        mutation.module_path,
+                        mutation.start_pos,
+                        mutation.end_pos,
+                    )
+
+                    job_ids.append(item.job_id)
+
+        if job_ids:
+            work_db.set_multiple_results(
+                job_ids,
+                WorkResult(
+                    output="Filtered git",
+                    worker_outcome=WorkerOutcome.SKIPPED,
+                ),
+            )
+
+    def filter(self, work_db: WorkDB, args: Namespace):
+        """Mark as skipped all work item that is not new"""
+
+        config = ConfigDict()
+        if args.config is not None:
+            config = load_config(args.config)
+
+        branch = config.sub("filters", "git-filter").get("branch", "master")
+        log.info(f"Base git branch: {branch}")
+        self._skip_filtered(work_db, branch)
+
+    def add_args(self, parser):
+        parser.add_argument("--config", help="Config file to use")
+
+
+def main(argv=None):
+    """Run the operators-filter with the specified command line arguments."""
+    return GitFilter().main(argv)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

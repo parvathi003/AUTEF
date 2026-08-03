@@ -1,0 +1,42 @@
+import os
+import shutil
+import logging
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+def copy_mutation_files():
+    """Delete existing files and copy from mutation test folder"""
+    try:
+        # Define paths
+        source_dir = r"D:\Sai\test\mutation\InsuranceApp_Modified"
+        target_dir = r"D:\Sai\EnhanceUnitTesting\source_files\InsuranceApp_Modified"
+        
+        # Delete existing directory if it exists
+        if os.path.exists(target_dir):
+            logger.info(f"Removing existing directory: {target_dir}")
+            shutil.rmtree(target_dir)
+        
+        # Create parent directory if it doesn't exist
+        os.makedirs(os.path.dirname(target_dir), exist_ok=True)
+        
+        # Copy the directory
+        logger.info(f"Copying files from: {source_dir}")
+        shutil.copytree(source_dir, target_dir)
+        logger.info(f"Files copied successfully to: {target_dir}")
+        
+        return True
+        
+    except Exception as e:
+        logger.error(f"Error copying files: {str(e)}")
+        return False
+
+if __name__ == "__main__":
+    if copy_mutation_files():
+        print("✅ Copy completed successfully")
+    else:
+        print("❌ Copy failed")

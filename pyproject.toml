@@ -1,0 +1,5 @@
+[tool.mutmut]
+paths_to_mutate = "D:/Sai/EnhanceUnitTesting/source_files/SampleApp"   # Make sure this is the full path to the source folder
+tests_dir = "D:/Sai/EnhanceUnitTesting/tests/SampleApp"                 # Full path to the test folder
+mutants_path = "D:/Sai/EnhanceUnitTesting/mutants"                      # Path for mutants to be saved
+test_command = "python -m unittest discover -s D:/Sai/EnhanceUnitTesting/tests/SampleApp"

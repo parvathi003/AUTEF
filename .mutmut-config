@@ -1,0 +1,4 @@
+[mutmut]
+paths_to_mutate = D:/Sai/EnhanceUnitTesting/source_files/SampleApp
+test_command = python -m unittest discover -s D:/Sai/EnhanceUnitTesting/tests/SampleApp
+mutants_path =D:/Sai/EnhanceUnitTesting/mutants

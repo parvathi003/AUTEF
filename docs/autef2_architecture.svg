@@ -1,0 +1,239 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1440 1000" width="1440" height="1000" font-family="Calibri, Segoe UI, Arial, sans-serif">
+  <defs>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#5A6478"/>
+    </marker>
+    <marker id="arg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#2E7D32"/>
+    </marker>
+  </defs>
+
+  <rect width="1440" height="1000" fill="#FFFFFF"/>
+
+  <text x="40" y="42" font-size="26" font-weight="700" fill="#1E2761" font-family="Cambria, Georgia, serif">AUTEF v2 — System Architecture</text>
+  <text x="40" y="66" font-size="13" fill="#6B7280">Every layer reads the detected ProjectLayout and runs in the project's own virtual environment. No layer contains a path to any particular application.</text>
+
+  <!-- ============ L1 INPUT ============ -->
+  <text x="40" y="122" font-size="11" font-weight="700" fill="#6B7280" letter-spacing="1">INPUT</text>
+  <rect x="210" y="85" width="980" height="64" rx="8" fill="#F4F6FB" stroke="#D8DEE9"/>
+  <text x="700" y="112" font-size="14" font-weight="700" fill="#22262E" text-anchor="middle">An arbitrary Python project</text>
+  <text x="700" y="133" font-size="11.5" fill="#6B7280" text-anchor="middle">.zip archive   ·   GitHub / archive URL   ·   directory on disk   ·   uploaded stream</text>
+  <line x1="700" y1="149" x2="700" y2="171" stroke="#5A6478" stroke-width="1.6" marker-end="url(#ar)"/>
+
+  <!-- ============ L2 PRESENTATION ============ -->
+  <text x="40" y="212" font-size="11" font-weight="700" fill="#6B7280" letter-spacing="1">PRESENTATION</text>
+  <text x="40" y="230" font-size="10" fill="#9AA5B5">what the user drives</text>
+  <rect x="210" y="175" width="580" height="100" rx="8" fill="#FFFFFF" stroke="#D8DEE9"/>
+  <text x="230" y="200" font-size="13.5" font-weight="700" fill="#1E2761">Streamlit application  ·  ui.py</text>
+  <rect x="230" y="212" width="172" height="46" rx="5" fill="#E8F3EA"/>
+  <text x="316" y="231" font-size="11.5" font-weight="700" fill="#22262E" text-anchor="middle">Repair a project</text>
+  <text x="316" y="248" font-size="9.5" fill="#6B7280" text-anchor="middle">9 stage buttons + Run all</text>
+  <rect x="412" y="212" width="172" height="46" rx="5" fill="#F4F6FB"/>
+  <text x="498" y="231" font-size="11.5" font-weight="700" fill="#22262E" text-anchor="middle">Compare v1 vs v2</text>
+  <text x="498" y="248" font-size="9.5" fill="#6B7280" text-anchor="middle">one repo, test by test</text>
+  <rect x="594" y="212" width="176" height="46" rx="5" fill="#F4F6FB"/>
+  <text x="682" y="231" font-size="11.5" font-weight="700" fill="#22262E" text-anchor="middle">Benchmark</text>
+  <text x="682" y="248" font-size="9.5" fill="#6B7280" text-anchor="middle">many repos, aggregate</text>
+
+  <rect x="810" y="175" width="380" height="100" rx="8" fill="#FFFFFF" stroke="#D8DEE9"/>
+  <text x="830" y="200" font-size="13.5" font-weight="700" fill="#1E2761">Command line  ·  cli.py</text>
+  <text x="830" y="223" font-size="11" fill="#22262E">check &#8212; is this project in scope? (no model calls)</text>
+  <text x="830" y="240" font-size="11" fill="#22262E">run &#8212; the nine-stage pipeline</text>
+  <text x="830" y="257" font-size="11" fill="#22262E">compare  ·  bench  ·  inject &#8212; the evaluation</text>
+  <line x1="700" y1="275" x2="700" y2="301" stroke="#5A6478" stroke-width="1.6" marker-end="url(#ar)"/>
+
+  <!-- ============ L3 ORCHESTRATION ============ -->
+  <text x="40" y="342" font-size="11" font-weight="700" fill="#6B7280" letter-spacing="1">ORCHESTRATION</text>
+  <text x="40" y="360" font-size="10" fill="#9AA5B5">decides what runs, in what order</text>
+  <rect x="210" y="305" width="314" height="100" rx="8" fill="#FFFFFF" stroke="#D8DEE9"/>
+  <text x="367" y="330" font-size="13" font-weight="700" fill="#1E2761" text-anchor="middle">pipeline.py</text>
+  <text x="367" y="351" font-size="10.5" fill="#22262E" text-anchor="middle">run_project() — end to end:</text>
+  <text x="367" y="368" font-size="10.5" fill="#6B7280" text-anchor="middle">ingest → environment → generate →</text>
+  <text x="367" y="384" font-size="10.5" fill="#6B7280" text-anchor="middle">repair → coverage → mutation</text>
+
+  <rect x="543" y="305" width="314" height="100" rx="8" fill="#FFFFFF" stroke="#D8DEE9"/>
+  <text x="700" y="330" font-size="13" font-weight="700" fill="#1E2761" text-anchor="middle">enhance.py</text>
+  <text x="700" y="351" font-size="10.5" fill="#22262E" text-anchor="middle">GenerationPhase · CoveragePhase</text>
+  <text x="700" y="368" font-size="10.5" fill="#22262E" text-anchor="middle">MutationPhase</text>
+  <text x="700" y="386" font-size="10" fill="#6B7280" text-anchor="middle">v1's three capabilities, re-pointed</text>
+
+  <rect x="876" y="305" width="314" height="100" rx="8" fill="#E8F3EA" stroke="#2E7D32"/>
+  <text x="1033" y="330" font-size="13" font-weight="700" fill="#2E7D32" text-anchor="middle">orchestrator.py</text>
+  <text x="1033" y="351" font-size="10.5" fill="#22262E" text-anchor="middle">RepairOrchestrator — the repair loop:</text>
+  <text x="1033" y="368" font-size="10.5" fill="#22262E" text-anchor="middle">diagnose → strategy → apply → verify</text>
+  <text x="1033" y="386" font-size="10.5" font-weight="700" fill="#2E7D32" text-anchor="middle">→ escalate / re-diagnose</text>
+  <line x1="700" y1="405" x2="700" y2="431" stroke="#5A6478" stroke-width="1.6" marker-end="url(#ar)"/>
+
+  <!-- ============ L4 AGENTS ============ -->
+  <text x="40" y="472" font-size="11" font-weight="700" fill="#6B7280" letter-spacing="1">AGENTS</text>
+  <text x="40" y="490" font-size="10" fill="#9AA5B5">the only layer that</text>
+  <text x="40" y="504" font-size="10" fill="#9AA5B5">calls the model</text>
+  <rect x="210" y="435" width="153" height="118" rx="7" fill="#F4F6FB" stroke="#D8DEE9"/>
+  <text x="286" y="462" font-size="11.5" font-weight="700" fill="#22262E" text-anchor="middle">Test</text>
+  <text x="286" y="478" font-size="11.5" font-weight="700" fill="#22262E" text-anchor="middle">Generation</text>
+  <text x="286" y="500" font-size="9.5" fill="#6B7280" text-anchor="middle">writes tests for</text>
+  <text x="286" y="513" font-size="9.5" fill="#6B7280" text-anchor="middle">untested modules</text>
+  <text x="286" y="534" font-size="9" fill="#2E7D32" text-anchor="middle" font-weight="700">stage 4</text>
+
+  <rect x="375" y="435" width="153" height="118" rx="7" fill="#E8F3EA" stroke="#2E7D32" stroke-width="1.5"/>
+  <text x="451" y="462" font-size="11.5" font-weight="700" fill="#22262E" text-anchor="middle">Failure</text>
+  <text x="451" y="478" font-size="11.5" font-weight="700" fill="#22262E" text-anchor="middle">Analysis</text>
+  <text x="451" y="500" font-size="9.5" fill="#6B7280" text-anchor="middle">reads the traceback,</text>
+  <text x="451" y="513" font-size="9.5" fill="#6B7280" text-anchor="middle">names the root cause</text>
+  <text x="451" y="534" font-size="9" fill="#2E7D32" text-anchor="middle" font-weight="700">stage 5  ·  NEW</text>
+
+  <rect x="540" y="435" width="153" height="118" rx="7" fill="#E8F3EA" stroke="#2E7D32" stroke-width="1.5"/>
+  <text x="616" y="462" font-size="11.5" font-weight="700" fill="#22262E" text-anchor="middle">Repair</text>
+  <text x="616" y="478" font-size="11.5" font-weight="700" fill="#22262E" text-anchor="middle">Strategy</text>
+  <text x="616" y="500" font-size="9.5" fill="#6B7280" text-anchor="middle">cause → next unused</text>
+  <text x="616" y="513" font-size="9.5" fill="#6B7280" text-anchor="middle">repair strategy</text>
+  <text x="616" y="534" font-size="9" fill="#2E7D32" text-anchor="middle" font-weight="700">stage 6  ·  NEW</text>
+
+  <rect x="705" y="435" width="153" height="118" rx="7" fill="#E8F3EA" stroke="#2E7D32" stroke-width="1.5"/>
+  <text x="781" y="462" font-size="11.5" font-weight="700" fill="#22262E" text-anchor="middle">AutoFix</text>
+  <text x="781" y="500" font-size="9.5" fill="#6B7280" text-anchor="middle">applies the patch,</text>
+  <text x="781" y="513" font-size="9.5" fill="#6B7280" text-anchor="middle">re-runs the test</text>
+  <text x="781" y="534" font-size="9" fill="#2E7D32" text-anchor="middle" font-weight="700">stage 6</text>
+
+  <rect x="870" y="435" width="153" height="118" rx="7" fill="#F4F6FB" stroke="#D8DEE9"/>
+  <text x="946" y="462" font-size="11.5" font-weight="700" fill="#22262E" text-anchor="middle">Coverage</text>
+  <text x="946" y="478" font-size="11.5" font-weight="700" fill="#22262E" text-anchor="middle">Improvement</text>
+  <text x="946" y="500" font-size="9.5" fill="#6B7280" text-anchor="middle">tests for the lines</text>
+  <text x="946" y="513" font-size="9.5" fill="#6B7280" text-anchor="middle">never executed</text>
+  <text x="946" y="534" font-size="9" fill="#2E7D32" text-anchor="middle" font-weight="700">stage 7</text>
+
+  <rect x="1035" y="435" width="155" height="118" rx="7" fill="#F4F6FB" stroke="#D8DEE9"/>
+  <text x="1112" y="462" font-size="11.5" font-weight="700" fill="#22262E" text-anchor="middle">Mutation</text>
+  <text x="1112" y="478" font-size="11.5" font-weight="700" fill="#22262E" text-anchor="middle">Kill</text>
+  <text x="1112" y="500" font-size="9.5" fill="#6B7280" text-anchor="middle">tests that catch a</text>
+  <text x="1112" y="513" font-size="9.5" fill="#6B7280" text-anchor="middle">surviving mutant</text>
+  <text x="1112" y="534" font-size="9" fill="#2E7D32" text-anchor="middle" font-weight="700">stage 8</text>
+
+  <line x1="700" y1="553" x2="700" y2="579" stroke="#5A6478" stroke-width="1.6" marker-end="url(#ar)"/>
+
+  <!-- external: model -->
+  <rect x="1240" y="435" width="160" height="118" rx="8" fill="#1E2761"/>
+  <text x="1320" y="470" font-size="12" font-weight="700" fill="#FFFFFF" text-anchor="middle">OpenAI API</text>
+  <text x="1320" y="492" font-size="10" fill="#CADCFC" text-anchor="middle">gpt-4o-mini</text>
+  <text x="1320" y="512" font-size="9" fill="#CADCFC" text-anchor="middle">held constant across</text>
+  <text x="1320" y="524" font-size="9" fill="#CADCFC" text-anchor="middle">both arms, so a result</text>
+  <text x="1320" y="536" font-size="9" fill="#CADCFC" text-anchor="middle">is never "better model"</text>
+  <line x1="1195" y1="494" x2="1235" y2="494" stroke="#5A6478" stroke-width="1.6" marker-end="url(#ar)"/>
+  <text x="1215" y="486" font-size="8.5" fill="#6B7280" text-anchor="middle">llm.py</text>
+
+  <!-- ============ L5 CORE ============ -->
+  <text x="40" y="620" font-size="11" font-weight="700" fill="#6B7280" letter-spacing="1">EXECUTION &amp;</text>
+  <text x="40" y="636" font-size="11" font-weight="700" fill="#6B7280" letter-spacing="1">PORTABILITY CORE</text>
+  <text x="40" y="656" font-size="10" fill="#9AA5B5">where v1's hardcoded</text>
+  <text x="40" y="670" font-size="10" fill="#9AA5B5">paths used to live</text>
+  <rect x="210" y="583" width="980" height="118" rx="8" fill="#FCFDFF" stroke="#D8DEE9"/>
+
+  <rect x="222" y="596" width="106" height="92" rx="5" fill="#F4F6FB"/>
+  <text x="275" y="620" font-size="10.5" font-weight="700" fill="#1E2761" text-anchor="middle">ingest</text>
+  <text x="275" y="640" font-size="8.5" fill="#6B7280" text-anchor="middle">unpack, detect</text>
+  <text x="275" y="652" font-size="8.5" fill="#6B7280" text-anchor="middle">layout, source</text>
+  <text x="275" y="664" font-size="8.5" fill="#6B7280" text-anchor="middle">&amp; test roots</text>
+
+  <rect x="332" y="596" width="106" height="92" rx="5" fill="#F4F6FB"/>
+  <text x="385" y="620" font-size="10.5" font-weight="700" fill="#1E2761" text-anchor="middle">venv_manager</text>
+  <text x="385" y="640" font-size="8.5" fill="#6B7280" text-anchor="middle">isolated env,</text>
+  <text x="385" y="652" font-size="8.5" fill="#6B7280" text-anchor="middle">the project's</text>
+  <text x="385" y="664" font-size="8.5" fill="#6B7280" text-anchor="middle">pinned pytest</text>
+
+  <rect x="442" y="596" width="106" height="92" rx="5" fill="#F4F6FB"/>
+  <text x="495" y="620" font-size="10.5" font-weight="700" fill="#1E2761" text-anchor="middle">runner</text>
+  <text x="495" y="640" font-size="8.5" fill="#6B7280" text-anchor="middle">pytest, one</text>
+  <text x="495" y="652" font-size="8.5" fill="#6B7280" text-anchor="middle">test root at</text>
+  <text x="495" y="664" font-size="8.5" fill="#6B7280" text-anchor="middle">a time</text>
+
+  <rect x="552" y="596" width="106" height="92" rx="5" fill="#F4F6FB"/>
+  <text x="605" y="620" font-size="10.5" font-weight="700" fill="#1E2761" text-anchor="middle">resolver</text>
+  <text x="605" y="640" font-size="8.5" fill="#6B7280" text-anchor="middle">traceback →</text>
+  <text x="605" y="652" font-size="8.5" fill="#6B7280" text-anchor="middle">real files, not</text>
+  <text x="605" y="664" font-size="8.5" fill="#6B7280" text-anchor="middle">name guessing</text>
+
+  <rect x="662" y="596" width="106" height="92" rx="5" fill="#F4F6FB"/>
+  <text x="715" y="620" font-size="10.5" font-weight="700" fill="#1E2761" text-anchor="middle">patcher</text>
+  <text x="715" y="640" font-size="8.5" fill="#6B7280" text-anchor="middle">AST-safe edit</text>
+  <text x="715" y="652" font-size="8.5" fill="#6B7280" text-anchor="middle">of one test</text>
+  <text x="715" y="664" font-size="8.5" fill="#6B7280" text-anchor="middle">function</text>
+
+  <rect x="772" y="596" width="106" height="92" rx="5" fill="#F4F6FB"/>
+  <text x="825" y="620" font-size="10.5" font-weight="700" fill="#1E2761" text-anchor="middle">chunker</text>
+  <text x="825" y="640" font-size="8.5" fill="#6B7280" text-anchor="middle">split source by</text>
+  <text x="825" y="652" font-size="8.5" fill="#6B7280" text-anchor="middle">syntax, not by</text>
+  <text x="825" y="664" font-size="8.5" fill="#6B7280" text-anchor="middle">512 chars</text>
+
+  <rect x="882" y="596" width="106" height="92" rx="5" fill="#F4F6FB"/>
+  <text x="935" y="620" font-size="10.5" font-weight="700" fill="#1E2761" text-anchor="middle">coverage_tool</text>
+  <text x="935" y="640" font-size="8.5" fill="#6B7280" text-anchor="middle">subprocess in</text>
+  <text x="935" y="652" font-size="8.5" fill="#6B7280" text-anchor="middle">the project's</text>
+  <text x="935" y="664" font-size="8.5" fill="#6B7280" text-anchor="middle">own venv</text>
+
+  <rect x="992" y="596" width="106" height="92" rx="5" fill="#F4F6FB"/>
+  <text x="1045" y="620" font-size="10.5" font-weight="700" fill="#1E2761" text-anchor="middle">mutation</text>
+  <text x="1045" y="640" font-size="8.5" fill="#6B7280" text-anchor="middle">AST mutant</text>
+  <text x="1045" y="652" font-size="8.5" fill="#6B7280" text-anchor="middle">engine, seeded</text>
+  <text x="1045" y="664" font-size="8.5" fill="#6B7280" text-anchor="middle">sampling</text>
+
+  <rect x="1102" y="596" width="76" height="92" rx="5" fill="#E8F3EA"/>
+  <text x="1140" y="620" font-size="10.5" font-weight="700" fill="#2E7D32" text-anchor="middle">guards</text>
+  <text x="1140" y="640" font-size="8.5" fill="#6B7280" text-anchor="middle">assertion</text>
+  <text x="1140" y="652" font-size="8.5" fill="#6B7280" text-anchor="middle">weakening,</text>
+  <text x="1140" y="664" font-size="8.5" fill="#6B7280" text-anchor="middle">regressions</text>
+
+  <line x1="700" y1="701" x2="700" y2="727" stroke="#5A6478" stroke-width="1.6" marker-end="url(#ar)"/>
+
+  <!-- external: venv -->
+  <rect x="1240" y="583" width="160" height="118" rx="8" fill="#F4F6FB" stroke="#D8DEE9"/>
+  <text x="1320" y="612" font-size="12" font-weight="700" fill="#1E2761" text-anchor="middle">Per-project</text>
+  <text x="1320" y="630" font-size="12" font-weight="700" fill="#1E2761" text-anchor="middle">virtualenv</text>
+  <text x="1320" y="652" font-size="9" fill="#6B7280" text-anchor="middle">the project's own</text>
+  <text x="1320" y="664" font-size="9" fill="#6B7280" text-anchor="middle">dependencies, at its</text>
+  <text x="1320" y="676" font-size="9" fill="#6B7280" text-anchor="middle">own pinned versions</text>
+  <line x1="1195" y1="642" x2="1235" y2="642" stroke="#5A6478" stroke-width="1.6" marker-end="url(#ar)"/>
+
+  <!-- ============ L6 EVALUATION ============ -->
+  <text x="40" y="768" font-size="11" font-weight="700" fill="#6B7280" letter-spacing="1">EVALUATION</text>
+  <text x="40" y="786" font-size="10" fill="#9AA5B5">runs both versions on</text>
+  <text x="40" y="800" font-size="10" fill="#9AA5B5">identical inputs</text>
+  <rect x="210" y="731" width="980" height="92" rx="8" fill="#FFFFFF" stroke="#D8DEE9"/>
+
+  <rect x="222" y="743" width="186" height="68" rx="5" fill="#F4F6FB"/>
+  <text x="315" y="766" font-size="11" font-weight="700" fill="#1E2761" text-anchor="middle">eval/faults</text>
+  <text x="315" y="784" font-size="8.5" fill="#6B7280" text-anchor="middle">seeds known defects of a</text>
+  <text x="315" y="796" font-size="8.5" fill="#6B7280" text-anchor="middle">declared mix, into passing tests</text>
+
+  <rect x="418" y="743" width="186" height="68" rx="5" fill="#FBEFEE"/>
+  <text x="511" y="766" font-size="11" font-weight="700" fill="#B85042" text-anchor="middle">eval/baseline</text>
+  <text x="511" y="784" font-size="8.5" fill="#6B7280" text-anchor="middle">the v1 arm: one prompt,</text>
+  <text x="511" y="796" font-size="8.5" fill="#6B7280" text-anchor="middle">one attempt, no verification</text>
+
+  <rect x="614" y="743" width="186" height="68" rx="5" fill="#F4F6FB"/>
+  <text x="707" y="766" font-size="11" font-weight="700" fill="#1E2761" text-anchor="middle">eval/benchmark</text>
+  <text x="707" y="784" font-size="8.5" fill="#6B7280" text-anchor="middle">pristine copy restored before</text>
+  <text x="707" y="796" font-size="8.5" fill="#6B7280" text-anchor="middle">each arm; shared environment</text>
+
+  <rect x="810" y="743" width="186" height="68" rx="5" fill="#F4F6FB"/>
+  <text x="903" y="766" font-size="11" font-weight="700" fill="#1E2761" text-anchor="middle">eval/compare</text>
+  <text x="903" y="784" font-size="8.5" fill="#6B7280" text-anchor="middle">paired table, McNemar</text>
+  <text x="903" y="796" font-size="8.5" fill="#6B7280" text-anchor="middle">exact test, per-fix cost</text>
+
+  <rect x="1006" y="743" width="172" height="68" rx="5" fill="#F4F6FB"/>
+  <text x="1092" y="766" font-size="11" font-weight="700" fill="#1E2761" text-anchor="middle">eval/metrics</text>
+  <text x="1092" y="784" font-size="8.5" fill="#6B7280" text-anchor="middle">fix rate · attempts · regressions</text>
+  <text x="1092" y="796" font-size="8.5" fill="#6B7280" text-anchor="middle">cost/fix · weakening rate</text>
+
+  <line x1="700" y1="823" x2="700" y2="849" stroke="#5A6478" stroke-width="1.6" marker-end="url(#ar)"/>
+
+  <!-- ============ L7 OUTPUT ============ -->
+  <text x="40" y="890" font-size="11" font-weight="700" fill="#6B7280" letter-spacing="1">OUTPUT</text>
+  <rect x="210" y="853" width="980" height="76" rx="8" fill="#1E2761"/>
+  <text x="700" y="880" font-size="13.5" font-weight="700" fill="#FFFFFF" text-anchor="middle">RunReport — one object the app, the CLI and the benchmark all read</text>
+  <text x="700" y="902" font-size="11" fill="#CADCFC" text-anchor="middle">before / after suite snapshots  ·  per-test repair records with cause, strategies and attempts  ·  coverage before/after  ·  mutation score before/after</text>
+  <text x="700" y="919" font-size="11" fill="#CADCFC" text-anchor="middle">tokens, cost and duration  ·  exported as JSON and CSV, or the repaired project as a .zip</text>
+
+  <!-- footnote -->
+  <text x="210" y="958" font-size="10.5" fill="#6B7280">Green = new in v2 or rewritten for it.  The three green agents replace v1's single repair prompt; guards is what stops a "fix" that passed by deleting the assertion.</text>
+  <text x="210" y="976" font-size="10.5" fill="#6B7280">Grey = v1 capability kept and re-pointed from <tspan font-family="Consolas, Courier New, monospace" fill="#B85042">source_files/InsuranceApp_Modified</tspan> to the project that was uploaded.</text>
+</svg>

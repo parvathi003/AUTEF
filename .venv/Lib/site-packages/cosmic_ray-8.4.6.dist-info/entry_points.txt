@@ -1,0 +1,18 @@
+[console_scripts]
+cosmic-ray = cosmic_ray.cli:main
+cr-badge = cosmic_ray.tools.badge:generate_badge
+cr-filter-git = cosmic_ray.tools.filters.git:main
+cr-filter-operators = cosmic_ray.tools.filters.operators_filter:main
+cr-filter-pragma = cosmic_ray.tools.filters.pragma_no_mutate:main
+cr-html = cosmic_ray.tools.html:report_html
+cr-http-workers = cosmic_ray.tools.http_workers:main
+cr-rate = cosmic_ray.tools.survival_rate:format_survival_rate
+cr-report = cosmic_ray.tools.report:report
+cr-xml = cosmic_ray.tools.xml:report_xml
+
+[cosmic_ray.distributors]
+http = cosmic_ray.distribution.http:HttpDistributor
+local = cosmic_ray.distribution.local:LocalDistributor
+
+[cosmic_ray.operator_providers]
+core = cosmic_ray.operators.provider:OperatorProvider

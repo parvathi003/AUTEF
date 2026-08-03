@@ -1,0 +1,28 @@
+{
+  "_comment": [
+    "Benchmark manifest. Each entry is one project in the sample.",
+    "",
+    "  name     : label used in the report",
+    "  source   : path to a project directory or .zip archive",
+    "  stratum  : grouping label, so results are reported per stratum rather",
+    "             than as one undifferentiated pool. Stratify on something you",
+    "             expect to matter -- suite size, test style, domain.",
+    "  inject   : how many known faults to seed before either arm runs. Seeded",
+    "             faults are only placed in tests that currently pass.",
+    "  max_tests: cap on failing tests attempted, to bound cost per project.",
+    "",
+    "Scope reminder: projects needing databases, network access, native",
+    "extensions or non-standard build steps are out of scope. Run",
+    "`autef2 check <project>` first -- it costs nothing and tells you whether",
+    "the suite runs at all."
+  ],
+  "projects": [
+    {
+      "name": "calcpkg",
+      "source": "tests_autef2/sample_project",
+      "stratum": "tiny",
+      "inject": 4,
+      "max_tests": 10
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+# AUTEF v2 dependencies.
+#
+# Much shorter than v1's requirements.txt on purpose. v1 pulled in langchain,
+# transformers, autogen, agentic_ai, mutmut, cosmic-ray and mutpy; the repair
+# path used none of them except autogen, and it bypassed autogen's agent loop
+# anyway by calling generate_oai_reply directly.
+
+openai>=1.30            # chat completions
+pytest>=7.0             # test execution (also installed into each project venv)
+python-dotenv>=1.0      # OPENAI_API_KEY from .env
+
+# UI only
+streamlit>=1.30
+pandas>=2.0
+
+# Optional: YAML benchmark manifests. JSON works without it.
+pyyaml>=6.0
+
+# tomli is only needed to read pyproject.toml on Python < 3.11;
+# 3.11+ has tomllib in the standard library.
+tomli>=2.0; python_version < "3.11"
