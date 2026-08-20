@@ -1,0 +1,49 @@
+{
+  "_comment": [
+    "AUTEF v2 benchmark sample. Three projects, chosen so the sample varies on",
+    "the two things that matter: project LAYOUT and how well the project is",
+    "already TESTED.",
+    "",
+    "  appdirs   flat layout   3 tests, main module untested  -> generation",
+    "  tabulate  package       322 tests                      -> repair",
+    "  cachetools  src layout  312 tests                      -> repair",
+    "",
+    "All three were verified with `autef2 check` and process in under 10",
+    "seconds each with no dependency installation, so the whole benchmark can",
+    "be re-run cheaply while you tune it.",
+    "",
+    "fault_kinds is declared deliberately. The baseline (v1) repairs a failing",
+    "test FUNCTION, so a file-scoped failure -- broken_import, broken_setup --",
+    "is one it cannot attempt at all. Seeding those measures reach, not repair",
+    "quality. This manifest therefore seeds only per-test faults, so both arms",
+    "can attempt every observation. Run manifest_reach.json separately to",
+    "measure the file-scoped case, and report the two apart."
+  ],
+  "projects": [
+    {
+      "name": "appdirs",
+      "source": "https://github.com/ActiveState/appdirs",
+      "stratum": "untested-flat",
+      "generate": 1,
+      "inject": 2,
+      "max_tests": 8,
+      "fault_kinds": ["wrong_expected", "bad_signature"]
+    },
+    {
+      "name": "python-tabulate",
+      "source": "https://github.com/astanin/python-tabulate",
+      "stratum": "tested-package",
+      "inject": 8,
+      "max_tests": 10,
+      "fault_kinds": ["wrong_expected", "bad_signature", "wrong_patch_target"]
+    },
+    {
+      "name": "cachetools",
+      "source": "https://github.com/tkem/cachetools",
+      "stratum": "tested-src",
+      "inject": 8,
+      "max_tests": 10,
+      "fault_kinds": ["wrong_expected", "bad_signature", "wrong_patch_target"]
+    }
+  ]
+}

@@ -56,6 +56,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         "compare": _cmd_compare,
         "bench": _cmd_bench,
         "inject": _cmd_inject,
+        "web": _cmd_web,
     }
     try:
         return handlers[args.command](args, config)
@@ -249,6 +250,13 @@ def _cmd_inject(args, config: AutefConfig) -> int:
 # ---------------------------------------------------------------------------
 
 
+def _cmd_web(args, config: AutefConfig) -> int:
+    from .web import serve
+
+    serve(port=args.port, host=args.host)
+    return 0
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="autef2",
@@ -343,6 +351,16 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Leave the signature cache on during the benchmark (off by default: "
         "it makes a project's result depend on which projects ran before it)",
+    )
+
+    web = subparsers.add_parser(
+        "web", help="Serve the web front end for the nine-stage pipeline"
+    )
+    web.add_argument("--port", type=int, default=8000)
+    web.add_argument(
+        "--host", default="127.0.0.1",
+        help="Bind address. Localhost by default: the sign-in is a "
+             "demonstration gate, not a security boundary.",
     )
 
     inject = subparsers.add_parser(

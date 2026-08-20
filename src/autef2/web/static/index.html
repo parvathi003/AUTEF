@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AUTEF v2</title>
+<link rel="stylesheet" href="styles.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%23415f91'/><path d='M9 17l4.5 4.5L23 12' stroke='white' stroke-width='3' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>">
+</head>
+<body>
+
+<!-- ============================= sign in ============================= -->
+<div id="login-screen" class="login-screen">
+  <div class="login-card" role="main">
+    <div class="brand">
+      <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
+        <rect width="32" height="32" rx="8"/>
+        <path d="M9 17l4.5 4.5L23 12" fill="none" stroke-width="3"
+              stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <div>
+        <h1>AUTEF v2</h1>
+        <p>Diagnosed, verified unit-test repair</p>
+      </div>
+    </div>
+
+    <form id="login-form" autocomplete="off" novalidate>
+      <div class="field">
+        <input id="username" type="text" placeholder=" " required
+               autocomplete="username" spellcheck="false">
+        <label for="username">Username</label>
+      </div>
+      <div class="field">
+        <input id="password" type="password" placeholder=" " required
+               autocomplete="current-password">
+        <label for="password">Password</label>
+      </div>
+      <p id="login-error" class="login-error" role="alert" hidden></p>
+      <button type="submit" class="btn filled full" id="login-button">Sign in</button>
+    </form>
+  </div>
+</div>
+
+<!-- ============================== app =============================== -->
+<div id="app" class="app" hidden>
+
+  <header class="appbar">
+    <svg class="brand-mark small" viewBox="0 0 32 32" aria-hidden="true">
+      <rect width="32" height="32" rx="8"/>
+      <path d="M9 17l4.5 4.5L23 12" fill="none" stroke-width="3"
+            stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    <div class="appbar-title">
+      <h1>AUTEF v2</h1>
+      <p id="appbar-subtitle">No project loaded</p>
+    </div>
+    <div class="appbar-actions">
+      <span id="key-chip" class="chip" title="Stages 4 to 8 need a model key"></span>
+      <span id="cost-chip" class="chip" title="Spend for this session"></span>
+      <span id="user-chip" class="chip strong"></span>
+      <button id="logout" class="btn text">Sign out</button>
+    </div>
+  </header>
+
+  <main class="layout">
+
+    <!-- ---------------------------- left ---------------------------- -->
+    <section class="col-left">
+
+      <div class="card">
+        <h2>Project</h2>
+        <div class="seg" role="tablist">
+          <button class="seg-btn active" data-mode="url" role="tab">Repository URL</button>
+          <button class="seg-btn" data-mode="upload" role="tab">Upload .zip</button>
+          <button class="seg-btn" data-mode="path" role="tab">Local path</button>
+        </div>
+
+        <div id="pane-url" class="pane">
+          <div class="field">
+            <input id="url-input" type="text" placeholder=" " spellcheck="false">
+            <label for="url-input">GitHub or archive URL</label>
+          </div>
+          <p class="hint">The tip of one branch is downloaded as an archive. Add
+            <code>/tree/&lt;branch&gt;</code> for a specific branch.</p>
+        </div>
+
+        <div id="pane-upload" class="pane" hidden>
+          <label class="dropzone" id="dropzone">
+            <input id="file-input" type="file" accept=".zip" hidden>
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 16V4m0 0L8 8m4-4l4 4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"
+                    fill="none" stroke-width="1.8" stroke-linecap="round"
+                    stroke-linejoin="round"/>
+            </svg>
+            <span id="dropzone-label">Choose a .zip file, or drop one here</span>
+          </label>
+        </div>
+
+        <div id="pane-path" class="pane" hidden>
+          <div class="field">
+            <input id="path-input" type="text" placeholder=" " spellcheck="false">
+            <label for="path-input">Directory or archive path</label>
+          </div>
+        </div>
+
+        <button id="load-project" class="btn filled full">Load project</button>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <h2>Run settings</h2>
+          <button id="settings-toggle" class="btn text small">Show</button>
+        </div>
+        <div id="settings-body" hidden>
+          <label class="control">
+            <span>Model</span>
+            <select id="set-model">
+              <option>gpt-4o-mini</option>
+              <option>gpt-4o</option>
+              <option>gpt-4.1-mini</option>
+            </select>
+          </label>
+
+          <label class="control slider">
+            <span>Escalation rungs per test <b id="val-attempts">3</b></span>
+            <input id="set-attempts" type="range" min="1" max="5" value="3">
+            <small>How many different repair strategies to try before giving up.</small>
+          </label>
+
+          <label class="switch">
+            <input id="set-venv" type="checkbox">
+            <span class="track"></span>
+            <span class="switch-text">
+              Isolated virtualenv per project
+              <small>Needed for any project with third-party imports. Slower.</small>
+            </span>
+          </label>
+
+          <label class="switch">
+            <input id="set-cache" type="checkbox" checked>
+            <span class="track"></span>
+            <span class="switch-text">
+              Reuse strategies for repeated failures
+              <small>Skips diagnosis when a failure matches one already repaired.</small>
+            </span>
+          </label>
+
+          <label class="control slider">
+            <span>Failing tests attempted <b id="val-tests">all</b></span>
+            <input id="set-tests" type="range" min="0" max="50" value="0">
+          </label>
+
+          <div class="divider"></div>
+          <p class="group-label">Phase limits</p>
+
+          <label class="control slider">
+            <span>Modules to generate for <b id="val-modules">5</b></span>
+            <input id="set-modules" type="range" min="1" max="30" value="5">
+          </label>
+          <label class="control slider">
+            <span>Files given coverage tests <b id="val-covfiles">3</b></span>
+            <input id="set-covfiles" type="range" min="1" max="20" value="3">
+          </label>
+          <label class="control slider">
+            <span>Mutants to score <b id="val-mutants">20</b></span>
+            <input id="set-mutants" type="range" min="1" max="100" value="20">
+            <small>Each mutant is one suite run — the main cost of stage 8.</small>
+          </label>
+          <label class="control slider">
+            <span>Survivors given tests <b id="val-survivors">5</b></span>
+            <input id="set-survivors" type="range" min="1" max="20" value="5">
+          </label>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <h2>Activity</h2>
+          <span id="elapsed" class="mono muted"></span>
+        </div>
+        <pre id="log" class="log">Waiting for a project.</pre>
+      </div>
+    </section>
+
+    <!-- --------------------------- right ---------------------------- -->
+    <section class="col-right">
+
+      <div class="card">
+        <div class="card-head">
+          <h2>Pipeline</h2>
+          <div class="head-actions">
+            <button id="reset" class="btn text small">Reset</button>
+            <button id="run-all" class="btn filled small">Run all stages</button>
+          </div>
+        </div>
+        <p class="hint">
+          One sequence. Each stage uses the state the previous one produced, and
+          re-running a stage discards everything derived from it. Stages 4 to 8
+          call the model.
+        </p>
+        <div id="stages" class="stages"></div>
+        <div id="banner" class="banner" hidden></div>
+      </div>
+
+      <div id="results" class="results"></div>
+    </section>
+  </main>
+</div>
+
+<div id="snackbar" class="snackbar" hidden></div>
+<script src="app.js"></script>
+</body>
+</html>

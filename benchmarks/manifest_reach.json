@@ -1,0 +1,33 @@
+{
+  "_comment": [
+    "The companion run to manifest.json, and it must be reported separately.",
+    "",
+    "These faults are FILE-SCOPED: a broken module-level import turns the whole",
+    "file into one collection error. v1 replaces a failing test *function*, and",
+    "a collection error has none, so v1 cannot attempt these at all -- it",
+    "records 'failing function could not be located' and spends nothing.",
+    "",
+    "That is a real and interesting difference, but it is a statement about",
+    "REACH, not about repair quality. Folding it into the main numbers would",
+    "hand v2 a margin it did not earn on prompt quality. Report this run as its",
+    "own row: 'observations v1 could not attempt', beside the main fix rate."
+  ],
+  "projects": [
+    {
+      "name": "python-tabulate-reach",
+      "source": "https://github.com/astanin/python-tabulate",
+      "stratum": "file-scoped",
+      "inject": 4,
+      "max_tests": 6,
+      "fault_kinds": ["broken_import"]
+    },
+    {
+      "name": "cachetools-reach",
+      "source": "https://github.com/tkem/cachetools",
+      "stratum": "file-scoped",
+      "inject": 4,
+      "max_tests": 6,
+      "fault_kinds": ["broken_import"]
+    }
+  ]
+}
