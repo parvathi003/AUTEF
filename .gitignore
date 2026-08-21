@@ -29,3 +29,21 @@ mutation_report_after.yaml
 .dot
 .png
 .cache
+# Virtual environments — never commit these. A partially committed .venv
+# (no python.exe, no pyvenv.cfg, 275 half-installed packages) shadows a real
+# one on clone and produces "no module named ..." errors.
+.venv/
+venv/
+.env.local
+
+# Build and tooling artefacts
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+build/
+dist/
+
+# AUTEF v2 run artefacts: unpacked projects, per-project venvs, reports.
+workspace/
+.autef/
