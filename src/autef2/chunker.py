@@ -215,14 +215,20 @@ def _source_files(layout: ProjectLayout) -> List[Path]:
 
     roots = [Path(r) for r in (layout.source_roots or [layout.root])]
 
-    # A test root that *is* a source root excludes nothing: a flat project with
-    # no tests yet has test_roots == [project root], and treating that as "all
-    # test code" would hide every module in the project from generation.
+    # A test root that *contains* a source root excludes nothing. A project
+    # with no tests yet has test_roots == [project root]; for a flat project
+    # that root is also the source root, and for a package project it is the
+    # source root's parent. Treating either as "all test code" hides every
+    # module from generation and leaves the mutation engine nothing to mutate
+    # -- silently, since an empty plan is not an error.
     source_resolved = {r.resolve() for r in roots}
     test_roots = [
-        Path(r).resolve()
-        for r in layout.test_roots
-        if Path(r).resolve() not in source_resolved
+        resolved
+        for resolved in (Path(r).resolve() for r in layout.test_roots)
+        if not any(
+            source == resolved or _within(source, resolved)
+            for source in source_resolved
+        )
     ]
 
     found: List[Path] = []
@@ -238,7 +244,14 @@ def _source_files(layout: ProjectLayout) -> List[Path]:
                 continue
             if TEST_FILE_RE.match(path.name) or path.name == "conftest.py":
                 continue
-            if path.name in ("setup.py", "__init__.py"):
+            # ``__init__.py`` is usually a re-export shim, but plenty of
+            # single-package libraries put the whole implementation in it --
+            # python-tabulate is one, and skipping it left generation and
+            # mutation looking at ``__main__.py`` and ``cli.py`` while the
+            # library itself went unexamined. Unit extraction already drops a
+            # module with nothing testable in it, so let that decide instead of
+            # excluding by filename.
+            if path.name == "setup.py":
                 continue
             resolved = path.resolve()
             if any(_within(resolved, tr) for tr in test_roots):

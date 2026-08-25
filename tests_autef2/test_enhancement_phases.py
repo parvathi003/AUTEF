@@ -559,3 +559,44 @@ def test_a_killer_test_that_fails_on_clean_source_is_discarded(tmp_path):
         "does not pass on the unmutated source" in (r.error or "")
         for r in outcome.records
     ), [r.error for r in outcome.records]
+
+
+def test_a_package_with_no_tests_is_not_invisible_to_generation(tmp_path):
+    """Two ways a package could vanish from generation and mutation, silently.
+
+    First, ``__init__.py`` was skipped by filename -- so python-tabulate, which
+    keeps its whole implementation there, reported "0 modules considered" and
+    had its mutation score computed over ``__main__.py`` and ``cli.py`` instead
+    of the library. A shim ``__init__.py`` still yields no units, so unit
+    extraction decides rather than the filename.
+
+    Second, a project with no tests has ``test_roots == [project root]``. For a
+    package layout that root is the *parent* of the source root, and excluding
+    it as "test code" excluded the entire package. verigak/progress looked like
+    a project with nothing testable in it for exactly this reason; it has five
+    testable modules and ninety-nine mutation sites.
+
+    An empty plan is not an error, so both failed quietly.
+    """
+    from autef2.chunker import _source_files
+    from autef2.ingest import analyse
+    from autef2.mutation import Mutator
+
+    root = tmp_path / "pkg"
+    (root / "lib").mkdir(parents=True)
+    (root / "lib" / "__init__.py").write_text(CLASSIFY_SOURCE, encoding="utf-8")
+    (root / "lib" / "shim").mkdir()
+    (root / "lib" / "shim" / "__init__.py").write_text(
+        "from lib import classify  # re-export only\n", encoding="utf-8"
+    )
+    layout = analyse(root)
+
+    names = {p.name for p in _source_files(layout)}
+    assert "__init__.py" in names, "the implementation module was skipped"
+
+    testable = {m.import_name for m in list_testable_modules(layout, limit=10)}
+    assert any(t.endswith("lib") or t == "lib" for t in testable), testable
+    assert not any("shim" in t for t in testable), "a re-export shim is not testable"
+
+    sites = Mutator(layout).sites(limit=50)
+    assert sites, "nothing to mutate means no mutation score for the library"
