@@ -1,5 +1,53 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "autef2"
+version = "2.0.0"
+description = "Diagnosed, verified unit-test repair for arbitrary Python projects"
+readme = "AUTEF_V2_EXPLAINED.md"
+requires-python = ">=3.9"
+license = { text = "Proprietary" }
+authors = [{ name = "Parvathi Kishore P" }]
+
+# Deliberately short. The web front end is served by http.server from the
+# standard library and uses no CSS or JS framework, so it adds nothing here.
+dependencies = [
+    "openai>=1.30",
+    "pytest>=7.0",
+    "python-dotenv>=1.0",
+    "tomli>=2.0; python_version < '3.11'",
+]
+
+[project.optional-dependencies]
+# YAML benchmark manifests. JSON works without it.
+yaml = ["pyyaml>=6.0"]
+
+[project.scripts]
+autef2 = "autef2.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+# Only v2 is packaged. ``agenticapp`` is v1, kept as the evaluation baseline and
+# imported by nothing here -- it still wants autogen and streamlit, which v2
+# does not install.
+include = ["autef2*"]
+
+[tool.setuptools.package-data]
+autef2 = ["web/static/*", "_plugin/*.py"]
+
+# ---------------------------------------------------------------------------
+# v1's mutation-testing configuration, left as it was.
+#
+# It points at D:/Sai/EnhanceUnitTesting and drives mutmut over the sample
+# application. v2 does not use it -- mutation is an AST engine in
+# ``autef2/mutation.py`` that needs nothing installed in the project under test
+# -- but v1 is the baseline arm of the evaluation and is not edited.
+# ---------------------------------------------------------------------------
+
 [tool.mutmut]
-paths_to_mutate = "D:/Sai/EnhanceUnitTesting/source_files/SampleApp"   # Make sure this is the full path to the source folder
-tests_dir = "D:/Sai/EnhanceUnitTesting/tests/SampleApp"                 # Full path to the test folder
-mutants_path = "D:/Sai/EnhanceUnitTesting/mutants"                      # Path for mutants to be saved
+paths_to_mutate = "D:/Sai/EnhanceUnitTesting/source_files/SampleApp"
+tests_dir = "D:/Sai/EnhanceUnitTesting/tests/SampleApp"
+mutants_path = "D:/Sai/EnhanceUnitTesting/mutants"
 test_command = "python -m unittest discover -s D:/Sai/EnhanceUnitTesting/tests/SampleApp"

@@ -441,9 +441,10 @@ All three obey the same three rules (`enhance.py` docstring):
 Global flags: `--workspace`, `--model`, `--max-attempts`, `--venv`,
 `--no-cache`, `--log-level`, `--json`.
 
-> **`autef2` is not an installed command.** `pyproject.toml` and `setup.cfg`
-> still hold v1's mutmut configuration rather than packaging metadata, so run it
-> as `$env:PYTHONPATH="src"` then `python -m autef2 ...`.
+> **Three ways to invoke it.** `.utef2.bat <command>` (or `./autef2.sh`)
+> needs no setup at all. `pip install -e .` gives a plain `autef2` command.
+> Otherwise set `$env:PYTHONPATH="src"` and use `python -m autef2 ...` -- the
+> package lives under `src/`, so a bare `python -m autef2` will not find it.
 
 ### Web UI (`python -m autef2 web`)
 
@@ -622,7 +623,9 @@ applicability**.
   reported separately.
 - **Results are model-dependent.** Everything measured used `gpt-4o-mini` at
   temperature 0.
-- **No packaging metadata**, so `pip install -e .` does not work.
+- **Antivirus TLS interception breaks pip itself**, not only the model client:
+  `CERTIFICATE_VERIFY_FAILED` on any install, so no dependencies can be fetched.
+  The launcher scripts exist so the project still runs on such a machine.
 
 ---
 

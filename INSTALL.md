@@ -175,7 +175,8 @@ to repair and nothing to compare.
 
 | Symptom | Cause and fix |
 |---|---|
-| `No module named 'autef2'` | `PYTHONPATH` is not set. Run `$env:PYTHONPATH="src"` (PowerShell) or `export PYTHONPATH=src` (bash) from the project root. |
+| `No module named 'autef2'` | The package lives under `src/`, so a bare `python -m autef2` from the project root cannot find it. Use `.\autef2.bat <command>`, or `pip install -e .`, or set `$env:PYTHONPATH="src"` first. |
+| pip: `CERTIFICATE_VERIFY_FAILED: self-signed certificate in certificate chain` | Antivirus TLS interception. pip cannot reach PyPI at all, so **no dependency install works** — fix this before anything else. Disable HTTPS scanning, or trust the antivirus root certificate. The launcher scripts need no install and work regardless. |
 | `No OpenAI API key found` | No `.env`, or it's not in the project root. Stages 1–3 and 9 still work without one. |
 | SSL / certificate errors on any model call | Antivirus TLS interception (Kaspersky and similar) breaks the OpenAI client. `llm.py` detects this and says so. Disable HTTPS scanning, or add the corporate root certificate to the environment. |
 | Stage 3 reports "the suite was still running and was stopped" | The project's own test suite is too large or too slow. Check its size first with `pytest tests --collect-only -q`. Anything over a few thousand tests is impractical — the pipeline runs the suite several times. |
@@ -185,11 +186,35 @@ to repair and nothing to compare.
 
 ---
 
-## A note on the current packaging
+## Running it without setting anything up
 
-The project runs from source via `PYTHONPATH=src`. There is no
-`pip install autef2` and no `autef2` console command, because `pyproject.toml`
-and `setup.cfg` in this repository still hold the *original* framework's
-mutation-testing configuration rather than packaging metadata.
+There is a launcher at the project root. It puts `src/` on the path, finds the
+virtualenv if there is one, and passes everything through:
 
-This does not affect behaviour — it only means the two-step invocation above.
+```powershell
+.\autef2.bat web
+```
+```powershell
+.\autef2.bat check https://github.com/astanin/python-tabulate
+```
+
+On macOS or Linux use `./autef2.sh` instead. Nothing to install, nothing to
+export.
+
+## Installing it properly
+
+`pyproject.toml` carries real packaging metadata, so where the network allows:
+
+```powershell
+.venv\Scripts\python.exe -m pip install -e .
+```
+
+That gives a plain `autef2` command and makes `import autef2` work from
+anywhere, with no `PYTHONPATH`.
+
+**If that fails with `CERTIFICATE_VERIFY_FAILED: self-signed certificate in
+certificate chain`,** an antivirus is intercepting TLS — Kaspersky does this by
+default. pip then cannot reach PyPI at all, which also blocks
+`pip install -r requirements-autef2.txt`, so it is worth fixing first: turn off
+HTTPS scanning, or add the antivirus root certificate to the store the
+interpreter trusts. If you cannot, use the launcher — it needs no install.
