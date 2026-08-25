@@ -266,6 +266,58 @@
       .catch(function (err) { snack(err.message); });
   });
 
+
+  /* ---------------------------- code viewer ------------------------- */
+
+  var openFiles = {};
+
+  function fileRow(entry, key) {
+    var id = "f_" + key.replace(/[^a-z0-9]/gi, "_");
+    var status = entry.kept
+      ? '<span class="tag ok">kept</span>'
+      : '<span class="tag bad">rejected</span>';
+    return '<div class="filerow">' +
+      '<button class="filehead" data-path="' + esc(entry.path) + '" data-id="' + id + '"' +
+      (entry.path ? "" : " disabled") + ">" +
+        '<span class="caret">' + (openFiles[id] ? "▾" : "▸") + "</span>" +
+        '<span class="mono fname">' + esc(entry.file || "(not written)") + "</span>" +
+        status +
+        '<span class="fmeta">' + entry.collected + " collected, " +
+          entry.passing + " passing</span>" +
+      "</button>" +
+      (entry.error ? '<div class="ferror">' + esc(entry.error) + "</div>" : "") +
+      '<pre class="code" id="' + id + '"' + (openFiles[id] ? "" : " hidden") + ">" +
+        (openFiles[id] || "") + "</pre></div>";
+  }
+
+  function wireFileRows() {
+    Array.prototype.forEach.call(document.querySelectorAll(".filehead"), function (head) {
+      head.addEventListener("click", function () {
+        var id = head.dataset.id;
+        var pre = $(id);
+        if (!pre) return;
+        if (!pre.hidden) {
+          pre.hidden = true;
+          delete openFiles[id];
+          head.querySelector(".caret").textContent = "▸";
+          return;
+        }
+        head.querySelector(".caret").textContent = "▾";
+        pre.hidden = false;
+        if (pre.textContent) return;
+        pre.textContent = "loading...";
+        fetch("/api/file?path=" + encodeURIComponent(head.dataset.path),
+              { headers: { "X-Autef-Token": token } })
+          .then(function (r) { return r.json(); })
+          .then(function (d) {
+            pre.textContent = d.error ? d.error : d.content;
+            openFiles[id] = pre.textContent;
+          })
+          .catch(function () { pre.textContent = "Could not read the file."; });
+      });
+    });
+  }
+
   /* ----------------------------- results ---------------------------- */
 
   function card(title, inner, extra) {
@@ -294,6 +346,12 @@
           metric("Dependencies", L.dependencies) +
           metric("Installable", L.installable ? "yes" : "no") +
         "</div>" +
+        (L.no_tests
+          ? '<div class="banner info" style="margin-top:12px">This project ships ' +
+            "<b>no test files</b>. Nothing failing is therefore not the same as " +
+            "everything passing — there is nothing to repair yet. Run " +
+            "<b>stage 4</b> to write a suite for it first.</div>"
+          : "") +
         '<p class="hint" style="margin-bottom:0">Working copy: <code>' + esc(L.root) + "</code></p>");
     }
 
@@ -312,29 +370,22 @@
 
     if (state.before) {
       var B = state.before;
-      var A = state.after;
-      var body = '<div class="metrics">' +
-        metric("Passing", A ? A.passed : B.passed,
-               A ? signed(A.passed - B.passed) : null,
-               A && A.passed >= B.passed ? "up" : "down") +
-        metric("Failing", A ? A.failed : B.failed,
-               A ? signed(A.failed - B.failed) : null,
-               A && A.failed <= B.failed ? "up" : "down") +
-        metric("Collection errors", B.collection_errors) +
-        metric("Suite time", B.duration_s + "s") +
-        "</div>";
-      html += card(A ? "Suite — before and after" : "Stage 3 — suite before repair", body,
-        A ? "before: " + B.passed + " passed, " + B.failed + " failed" : null);
+      html += card("Stage 3 — suite before repair",
+        '<div class="metrics">' +
+          metric("Passing", B.passed) +
+          metric("Failing", B.failed) +
+          metric("Collection errors", B.collection_errors) +
+          metric("Suite time", B.duration_s + "s") +
+        "</div>" +
+        '<p class="hint" style="margin-bottom:0">The project as it arrived. ' +
+        "This snapshot is never rewritten — later stages add test files, and " +
+        "the final report compares against this.</p>");
     }
 
     if (state.generation) {
       var G = state.generation;
-      var rows = G.records.map(function (r) {
-        return "<tr><td class=\"mono\">" + esc(r.file || "-") + "</td>" +
-          "<td class=\"mono\">" + esc(r.module) + "</td>" +
-          "<td>" + (r.kept ? '<span class="tag ok">kept</span>' : '<span class="tag bad">rejected</span>') + "</td>" +
-          "<td>" + r.collected + "</td><td>" + r.passing + "</td>" +
-          "<td>" + esc(r.error) + "</td></tr>";
+      var rows = G.records.map(function (r, i) {
+        return fileRow(r, "gen" + i);
       }).join("");
       html += card("Stage 4 — generated tests",
         '<div class="metrics">' +
@@ -342,9 +393,9 @@
           metric("Files kept", G.accepted) +
           metric("Tests added", G.tests_added) +
         "</div>" +
-        (rows ? '<div class="scroll"><table><tr><th>File</th><th>Module</th><th>Kept</th>' +
-          "<th>Collected</th><th>Passing</th><th>Problem</th></tr>" + rows + "</table></div>" : "") +
-        '<p class="hint" style="margin-bottom:0">A file is kept only if pytest can run it. ' +
+        rows +
+        '<p class="hint" style="margin-bottom:0">Click a file to read what was ' +
+        "written. A file is kept only if pytest can run it. " +
         "Generated tests that <i>fail</i> are kept on purpose — they are the repair loop's input.</p>");
     }
 
@@ -357,7 +408,18 @@
         var status = r.fixed ? '<span class="tag ok">fixed</span>'
           : r.skipped_reason ? '<span class="tag neutral">skipped</span>'
           : '<span class="tag bad">not fixed</span>';
-        return "<tr><td class=\"mono\">" + esc(r.nodeid) + "</td>" +
+        var applied = r.attempts.filter(function (a) { return a.patch; });
+        var patch = applied.length
+          ? '<details class="patch"><summary>the code it wrote (' +
+            applied.length + " attempt" + (applied.length > 1 ? "s" : "") + ")</summary>" +
+            applied.map(function (a) {
+              return '<div class="patchhead">' + a.n + ". " + esc(a.strategy) +
+                (a.verified ? ' <span class="tag ok">verified</span>'
+                            : ' <span class="tag bad">rejected</span>') + "</div>" +
+                '<pre class="code">' + esc(a.patch) + "</pre>";
+            }).join("") + "</details>"
+          : "";
+        return "<tr><td class=\"mono\">" + esc(r.nodeid) + patch + "</td>" +
           "<td>" + esc(r.cause || "-") + "</td>" +
           "<td>" + status + "</td>" +
           "<td>" + r.attempts.length + "</td>" +
@@ -382,7 +444,9 @@
               metric("Branch coverage", C.branch_after + "%", signed(C.branch_after - C.branch_before, "pts"), "up") +
               metric("Statements", C.statements) +
               metric("Tests written", C.written) +
-            "</div>"
+              (C.repaired ? metric("Failing tests repaired", C.repaired) : "") +
+            "</div>" +
+            (C.files || []).map(function (f, i) { return fileRow(f, "cov" + i); }).join("")
           : '<div class="banner">Coverage could not be measured' +
             (C.error ? ": " + esc(C.error) : "") + "</div>");
     }
@@ -396,8 +460,41 @@
               metric("Killed", M.killed_after + " / " + M.total) +
               metric("Newly killed", M.newly_killed) +
               metric("Killer tests kept", M.written) +
-            "</div>"
+            "</div>" +
+            (M.files || []).map(function (f, i) { return fileRow(f, "mut" + i); }).join("")
           : '<div class="banner info">' + esc(M.skipped_reason || "Not measured.") + "</div>");
+    }
+
+    if (state.after) {
+      var B2 = state.before || {passed: 0, failed: 0};
+      var A2 = state.after;
+      var fixed2 = state.records.filter(function (r) { return r.fixed; }).length;
+      var weak2 = state.records.filter(function (r) { return r.weakened; }).length;
+      var reg2 = state.records.filter(function (r) { return r.regression; }).length;
+      html += card("Stage 9 — final report",
+        '<div class="metrics">' +
+          metric("Passing", A2.passed, signed(A2.passed - B2.passed),
+                 A2.passed >= B2.passed ? "up" : "down") +
+          metric("Failing", A2.failed, signed(A2.failed - B2.failed),
+                 A2.failed <= B2.failed ? "up" : "down") +
+          metric("Repaired", fixed2 + " / " + state.records.length) +
+          metric("Weakened", weak2, weak2 ? "assertions gutted" : "none", weak2 ? "down" : "up") +
+          metric("Regressions", reg2, reg2 ? "broke a passing test" : "none", reg2 ? "down" : "up") +
+          metric("Cost", "$" + state.usage.cost_usd.toFixed(4),
+                 state.usage.calls + " model calls") +
+        "</div>" +
+        '<div class="downloads">' +
+          '<button class="btn filled small" data-dl="/api/report.html">Download full report (HTML)</button>' +
+          '<button class="btn tonal small" data-dl="/api/report.json">JSON</button>' +
+          '<button class="btn tonal small" data-dl="/api/project.zip">Repaired project (.zip)</button>' +
+        "</div>" +
+        '<p class="hint" style="margin-bottom:0">The HTML report is one ' +
+        "self-contained file and carries the complete text of every test that " +
+        "was written and every repair that was applied. Before: " + B2.passed +
+        " passing, " + B2.failed + " failing; after: " + A2.passed +
+        " passing, " + A2.failed + " failing. Weakened counts fixes that " +
+        "passed only by removing an assertion — it is what makes the other " +
+        "numbers trustworthy.</p>");
     }
 
     if (!html) {
@@ -407,6 +504,40 @@
     }
 
     $("results").innerHTML = html;
+    wireFileRows();
+    wireDownloads();
+  }
+
+  function wireDownloads() {
+    Array.prototype.forEach.call(document.querySelectorAll("[data-dl]"), function (button) {
+      button.addEventListener("click", function () {
+        var label = button.textContent;
+        button.disabled = true;
+        button.textContent = "Preparing...";
+        // Sent as a fetch rather than a link so the session header goes with
+        // it; the blob is then handed to the browser to save.
+        fetch(button.dataset.dl, { headers: { "X-Autef-Token": token } })
+          .then(function (r) {
+            if (!r.ok) throw new Error("HTTP " + r.status);
+            var name = (r.headers.get("Content-Disposition") || "")
+              .replace(/.*filename="?([^"]+)"?.*/, "$1") || "autef2-report";
+            return r.blob().then(function (blob) { return { blob: blob, name: name }; });
+          })
+          .then(function (out) {
+            var url = URL.createObjectURL(out.blob);
+            var a = document.createElement("a");
+            a.href = url;
+            a.download = out.name;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setTimeout(function () { URL.revokeObjectURL(url); }, 4000);
+            snack("Downloaded " + out.name);
+          })
+          .catch(function (err) { snack("Download failed: " + err.message); })
+          .finally(function () { button.disabled = false; button.textContent = label; });
+      });
+    });
   }
 
   function signed(value, unit) {

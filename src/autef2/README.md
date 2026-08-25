@@ -81,10 +81,10 @@ Diagnose and repair:
 python -m autef2 run path/to/project.zip --venv --max-tests 20
 ```
 
-Streamlit UI:
+Web UI:
 
 ```bash
-streamlit run src/autef2/ui.py
+python -m autef2 web
 ```
 
 Run from `src/`, or install the package, so `autef2` is importable.
@@ -175,7 +175,7 @@ agents/           the three agents
 orchestrator.py   the repair loop
 pipeline.py       end to end
 eval/             baseline arm, fault injection, metrics, benchmark
-cli.py, ui.py     entry points
+cli.py, web/      entry points
 ```
 
 ---

@@ -71,7 +71,7 @@ def ingest(
     * a path to a ``.zip`` or ``.tar.gz``/``.tgz``/``.tar.bz2`` archive,
     * a repository or archive URL (``https://github.com/owner/repo``, with an
       optional ``/tree/<branch>``, or any direct archive link),
-    * or an open binary stream, which is what Streamlit's uploader hands over.
+    * or an open binary stream, for an upload held in memory.
     """
     root = _materialise(source, config, name_hint)
     return analyse(root, name_hint=name_hint)

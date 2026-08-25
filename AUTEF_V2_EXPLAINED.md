@@ -315,8 +315,10 @@ and start disagreeing.
 Run it with:
 
 ```bash
-streamlit run src/autef2/ui.py
+python -m autef2 web
 ```
+
+Then open `http://127.0.0.1:8000` and sign in with `autef` / `autef2025`.
 
 ### The sidebar (always visible)
 
@@ -511,7 +513,7 @@ $env:PYTHONPATH="src"
 | v1 vs v2 on one repo | `python -m autef2 compare <project> -n 8` |
 | Measure across many repos | `python -m autef2 bench benchmarks/manifest.json` |
 | Just seed faults | `python -m autef2 inject <project> -n 10` |
-| The app | `python -m streamlit run src/autef2/ui.py` |
+| The app | `python -m autef2 web` |
 
 **Fast projects to try:** `python-tabulate` and `cachetools` — both come back
 fully green in under 8 seconds with no dependency installation.

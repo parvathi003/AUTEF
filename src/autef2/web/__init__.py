@@ -1,9 +1,9 @@
 """A Material-styled web front end for the nine-stage repair pipeline.
 
-Separate from ``ui.py`` (Streamlit) rather than replacing it: the Streamlit app
-still carries the Compare and Benchmark tabs, which are run offline to produce
-the report. This front end is the demonstrable product -- sign in, upload a
-project, watch nine stages run.
+This is the product: sign in, upload a project, watch nine stages run. The
+comparison and the benchmark are deliberately absent -- they are experiments
+costing real money per project, and they belong on the command line, which is
+where report numbers should come from.
 
 Deliberately built on ``http.server`` from the standard library. Adding Flask or
 FastAPI would put a second web framework in a project whose whole argument is

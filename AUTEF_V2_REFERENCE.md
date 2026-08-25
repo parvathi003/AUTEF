@@ -21,7 +21,7 @@ For setup see [`INSTALL.md`](INSTALL.md). The system architecture diagram is at
 7. [The repair loop in depth](#7-the-repair-loop-in-depth)
 8. [The enhancement phases in depth](#8-the-enhancement-phases-in-depth)
 9. [Configuration reference](#9-configuration-reference)
-10. [The three interfaces](#10-the-three-interfaces)
+10. [The two interfaces](#10-the-two-interfaces)
 11. [The evaluation system](#11-the-evaluation-system)
 12. [Problems you may face](#12-problems-you-may-face)
 13. [Bugs found by running real repositories](#13-bugs-found-by-running-real-repositories)
@@ -122,7 +122,7 @@ Seven layers. Full diagram: [`docs/autef2_architecture.svg`](docs/autef2_archite
 
 ```
 INPUT          .zip · GitHub URL · directory · uploaded stream
-PRESENTATION   Web UI (9 stages) · Streamlit UI (+ evaluation tabs) · CLI (6 commands)
+PRESENTATION   Web UI (9 stages, signed in) · CLI (6 commands, incl. the evaluation)
 ORCHESTRATION  pipeline.py · enhance.py · orchestrator.py
 AGENTS         Generation · FailureAnalysis · RepairStrategy · AutoFix · CoverageImprove · MutationKill
 CORE           ingest · venv_manager · runner · resolver · patcher · chunker · coverage_tool · mutation · guards
@@ -254,7 +254,6 @@ Re-running a stage discards everything derived from it. The map lives in
 | Module | Lines | Responsibility |
 |---|---:|---|
 | `cli.py` | 410 | `check`, `run`, `compare`, `bench`, `inject`, `web`. |
-| `ui.py` | 1532 | Streamlit: Repair / Compare / Benchmark tabs. |
 | `web/server.py` | 811 | Stdlib HTTP server, sessions, hardcoded auth, background stage workers. |
 | `web/static/*` | — | Material Design 3 front end: `index.html`, `styles.css`, `app.js`. |
 
@@ -279,9 +278,8 @@ All in `models.py`, all with `to_dict()`.
 | `MutationSnapshot` / `Mutant` | file, lineno, operator, original, mutated, killed, killed_by, error |
 | `RunReport` | everything above, plus tokens, cost, duration, arm |
 
-**`RunReport` is the single output object.** The web UI, the Streamlit UI, the
-CLI and the benchmark all read it, so the demo and the measurement cannot drift
-apart.
+**`RunReport` is the single output object.** The web UI, the CLI and the
+benchmark all read it, so the demo and the measurement cannot drift apart.
 
 ---
 
@@ -427,7 +425,7 @@ All three obey the same three rules (`enhance.py` docstring):
 
 ---
 
-## 10. The three interfaces
+## 10. The two interfaces
 
 ### CLI (`python -m autef2`)
 
@@ -461,10 +459,11 @@ for the report.
   `/api/config`, `/api/stage`, `/api/run-all`, `/api/state`, `/api/reset`.
 - Stages run on background threads; the page polls `/api/state` every 1.5s.
 
-### Streamlit UI (`streamlit run src/autef2/ui.py`)
-
-The same nine stages **plus** the Compare and Benchmark tabs. This is the one to
-use when producing report numbers.
+There is no second UI. A Streamlit front end existed during development and was
+removed: it carried the Compare and Benchmark tabs, and putting an experiment
+that costs real money per project behind a button in the product invited running
+it by accident. Both are CLI commands, which is where report numbers should come
+from anyway.
 
 ---
 
@@ -539,7 +538,7 @@ chapter.**
 | Symptom | Cause | Fix |
 |---|---|---|
 | `No module named 'autef2'` | `PYTHONPATH` unset — there is no installed package | `$env:PYTHONPATH="src"` from the project root |
-| `No module named 'openai'` / `streamlit` after a clone | A partially committed `.venv` shadowing a real one | Delete `.venv`, recreate, reinstall (see §16) |
+| `No module named 'openai'` after a clone | A partially committed `.venv` shadowing a real one | Delete `.venv`, recreate, reinstall (see §16) |
 | `.venv\Scripts\python.exe` not found | Same cause — the committed venv had no interpreter | Same fix |
 | `pip install -r requirements.txt` drags in langchain, transformers, autogen | That is **v1's** requirements file | Use `requirements-autef2.txt` |
 | venv creation fails on Windows with a path-length error | `site-packages` paths exceed 260 characters from a deep workspace | `--workspace C:\autef` |
@@ -636,8 +635,8 @@ $env:PYTHONPATH="src"
 
 **138 tests, about 3–4 minutes.** They cover ingest and layout detection, the
 pytest runner, the resolver, the AST patcher, the mutation engine, the guards,
-the enhancement phases, the evaluation harness, and the Streamlit UI (via
-`streamlit.testing.v1.AppTest`).
+the enhancement phases, the evaluation harness, and the web front end (its
+stage gating, its snapshot, and that it ships no evaluation tabs).
 
 Several encode a specific past failure and should not be deleted:
 

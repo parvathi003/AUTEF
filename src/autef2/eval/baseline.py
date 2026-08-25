@@ -214,7 +214,9 @@ class BaselineOrchestrator:
 
         # Written and accepted without checking. That is the point of the arm.
         attempt.applied = True
-        attempt.patch_preview = code[:600]
+        # Kept whole, matching the v2 arm, so the two are compared on the same
+        # evidence rather than one being easier to read than the other.
+        attempt.patch_preview = code[:8000]
 
         # The arm does not act on this, but it is measured for both arms
         # identically -- weakening is a comparison of the code before and

@@ -9,9 +9,9 @@ openai>=1.30            # chat completions
 pytest>=7.0             # test execution (also installed into each project venv)
 python-dotenv>=1.0      # OPENAI_API_KEY from .env
 
-# UI only
-streamlit>=1.30
-pandas>=2.0
+# The web front end is served by http.server from the standard library and
+# uses no CSS or JS framework, so it adds no dependency here. streamlit and
+# pandas were needed by the previous Streamlit UI and are no longer used.
 
 # Optional: YAML benchmark manifests. JSON works without it.
 pyyaml>=6.0

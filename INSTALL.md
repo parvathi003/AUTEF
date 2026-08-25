@@ -65,8 +65,9 @@ anything and can't accidentally install into system Python.
 .venv/bin/python -m pip install -r requirements-autef2.txt
 ```
 
-That installs five packages: `openai`, `pytest`, `python-dotenv`, `streamlit`,
-`pandas` (plus optional `pyyaml`).
+That installs three packages: `openai`, `pytest` and `python-dotenv` (plus
+optional `pyyaml`). The web front end is served by `http.server` from the
+standard library and uses no CSS or JS framework, so it adds nothing here.
 
 > **Do not install `requirements.txt`.** That file belongs to v1 and pulls in
 > langchain, transformers, autogen, mutmut and cosmic-ray. v2 needs none of
@@ -131,7 +132,7 @@ is good.
 **The web application:**
 
 ```powershell
-.venv\Scripts\python.exe -m streamlit run src/autef2/ui.py
+.venv\Scripts\python.exe -m autef2 web
 ```
 
 It opens in a browser at `http://localhost:8501`. Three tabs: **Repair a

@@ -12,7 +12,7 @@
 Stages take minutes, so a stage request starts a worker thread and returns
 immediately; the page polls ``/api/state``. One session is one pipeline: the
 detected layout, the virtualenv and the model client all live as long as the
-browser session does, exactly as they do in the Streamlit app.
+browser session does.
 
 Deliberately built on ``http.server`` from the standard library. Adding Flask or
 FastAPI would put a second web framework into a project whose whole argument is
@@ -32,8 +32,9 @@ import time
 import traceback
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
+from pathlib import Path, PurePath
 from typing import Any, Dict, List, Optional
+from urllib.parse import parse_qs
 
 logger = logging.getLogger(__name__)
 
@@ -150,7 +151,7 @@ class Session:
                 "coverage", "mutation"),
             5: ("records", "after"),
             6: ("after",),
-            7: ("coverage", "mutation", "after"),
+            7: ("coverage", "coverage_repaired", "mutation", "after"),
             8: ("mutation", "after"),
             9: (),
         }
@@ -299,6 +300,7 @@ def _stage_diagnose(session: Session, config) -> None:
     for failure in st.get("failures") or []:
         records[failure.nodeid] = orchestrator.diagnose(failure)
     st["records"] = records
+    st.pop("coverage_repaired", None)
 
 
 def _stage_repair(session: Session, config) -> None:
@@ -310,6 +312,25 @@ def _stage_repair(session: Session, config) -> None:
     for failure in st.get("failures") or []:
         records[failure.nodeid] = orchestrator.repair(
             failure, baseline_passing, record=records.get(failure.nodeid)
+        )
+    st["records"] = records
+
+
+def _repair_pass(session: Session, config, *, merge: bool) -> None:
+    """Diagnose and repair everything currently failing.
+
+    ``merge`` keeps records from an earlier pass. Stage 6 replaces them; a
+    later pass over newly written tests adds to them, because the earlier
+    repairs are still part of the run and must survive into the report.
+    """
+    st = session.state
+    orchestrator = _orchestrator(session, config)
+    records = dict(st.get("records") or {}) if merge else {}
+    baseline_passing = st.get("baseline_passing") or []
+    for failure in st.get("failures") or []:
+        diagnosed = orchestrator.diagnose(failure)
+        records[failure.nodeid] = orchestrator.repair(
+            failure, baseline_passing, record=diagnosed
         )
     st["records"] = records
 
@@ -326,9 +347,19 @@ def _stage_coverage(session: Session, config) -> None:
     if outcome.layout is not None:
         st["layout"] = outcome.layout
         st.pop("orchestrator", None)
-    if outcome.accepted:
-        # Coverage tests can fail like any others; surfacing them here is what
-        # lets stages 5 and 6 be re-run over them.
+
+    if not outcome.accepted:
+        return
+
+    # Coverage tests can fail like any others, and they are written *after*
+    # stage 6 has run -- so without this pass they never reach the repair loop
+    # at all. They would then sit failing in the final report and block the
+    # mutation phase's green gate, making the run look worse than the pipeline
+    # actually is. ``pipeline.py`` does the same thing on the CLI path.
+    _collect_suite(session, config, baseline=False)
+    if st.get("failures"):
+        st["coverage_repaired"] = len(st["failures"])
+        _repair_pass(session, config, merge=True)
         _collect_suite(session, config, baseline=False)
 
 
@@ -464,6 +495,22 @@ def _suite_summary(result) -> Dict[str, Any]:
     }
 
 
+def _written_files(records) -> List[Dict[str, Any]]:
+    """The test files a phase wrote, for the on-demand viewer."""
+    return [
+        {
+            "file": Path(r.test_file).name if r.test_file else "",
+            "path": r.test_file or "",
+            "module": r.module_import,
+            "kept": r.accepted,
+            "collected": r.tests_collected,
+            "passing": r.tests_passing,
+            "error": r.error or "",
+        }
+        for r in records
+    ]
+
+
 def _snapshot(session: Session) -> Dict[str, Any]:
     from ..config import resolve_api_key
 
@@ -497,6 +544,10 @@ def _snapshot(session: Session) -> Dict[str, Any]:
             "installable": layout.installable,
             "dependencies": len(layout.declared_dependencies),
             "notes": list(layout.notes),
+            # A repository with no tests is not a repository whose tests all
+            # pass. Reporting "nothing is failing" for one reads as success and
+            # sends the reader looking for a bug that is not there.
+            "no_tests": not layout.test_files,
         }
 
     env = st.get("environment")
@@ -540,6 +591,7 @@ def _snapshot(session: Session) -> Dict[str, Any]:
                     "label": a.strategy_label,
                     "verified": a.verified_pass,
                     "rejected": a.rejected_reason,
+                    "patch": a.patch_preview or "",
                 }
                 for a in r.attempts
             ],
@@ -557,6 +609,7 @@ def _snapshot(session: Session) -> Dict[str, Any]:
                 {
                     "module": g.module_import,
                     "file": Path(g.test_file).name if g.test_file else "",
+                    "path": g.test_file or "",
                     "kept": g.accepted,
                     "collected": g.tests_collected,
                     "passing": g.tests_passing,
@@ -579,6 +632,8 @@ def _snapshot(session: Session) -> Dict[str, Any]:
             "branch_after": round((after.branch_rate if after else 0) * 100, 1),
             "statements": before.statements if before else 0,
             "written": len(cov.accepted),
+            "repaired": st.get("coverage_repaired", 0),
+            "files": _written_files(cov.records),
         }
 
     mut = st.get("mutation")
@@ -595,6 +650,7 @@ def _snapshot(session: Session) -> Dict[str, Any]:
             "total": before.total if before else 0,
             "newly_killed": mut.newly_killed,
             "written": len(mut.accepted),
+            "files": _written_files(mut.records),
         }
 
     llm = st.get("llm")
@@ -614,6 +670,56 @@ def _snapshot(session: Session) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 # HTTP
 # ---------------------------------------------------------------------------
+
+
+def _label_for(source: str) -> str:
+    """A bare project name from a URL or a path.
+
+    Splitting on "/" alone is not enough: a Windows path contains none, so the
+    whole path became the name. That name is used as a directory under the
+    workspace, and ``projects_dir / "<absolute path>"`` collapses back onto the
+    original -- which once had a run seeding faults into the caller's own
+    directory instead of a working copy.
+    """
+    text = source.strip().rstrip("/\\")
+    for suffix in (".zip", ".tar.gz", ".tgz", ".tar.bz2", ".git"):
+        if text.lower().endswith(suffix):
+            text = text[: -len(suffix)]
+    tail = PurePath(text.replace("\\", "/")).name
+    # A GitHub URL ending in /tree/<branch> names the branch, not the project.
+    return "".join(c for c in tail if c.isalnum() or c in "-_.") or "project"
+
+
+def _read_project_file(session: Session, wanted: str):
+    """One file from the project under test, for the code viewer.
+
+    Confined to the working copy. The path arrives from the browser, and a
+    signed-in user must not be able to read the rest of the machine through a
+    text box -- ``..`` is what this exists to stop.
+    """
+    layout = session.state.get("layout")
+    if layout is None or not wanted:
+        return {"error": "No project loaded."}, 400
+
+    root = Path(layout.root).resolve()
+    try:
+        target = (root / wanted).resolve() if not Path(wanted).is_absolute() else Path(wanted).resolve()
+        target.relative_to(root)
+    except (ValueError, OSError):
+        return {"error": "That file is outside the project."}, 403
+
+    if not target.is_file():
+        return {"error": "No such file."}, 404
+    try:
+        text = target.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        return {"error": str(exc)}, 500
+
+    return {
+        "path": str(target.relative_to(root)),
+        "content": text[:200_000],
+        "lines": len(text.splitlines()),
+    }, 200
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -658,6 +764,32 @@ class Handler(BaseHTTPRequestHandler):
         with SESSIONS_LOCK:
             return SESSIONS.get(token)
 
+    def _download(self, session: Session, route: str) -> None:
+        from . import report
+
+        raw = session.state["layout"].name or "project"
+        name = "".join(c for c in PurePath(str(raw)).name if c.isalnum() or c in "-_.")
+        name = name or "project"
+        if route == "/api/project.zip":
+            body = report.build_zip(session) or b""
+            ctype, filename = "application/zip", f"autef2-{name}.zip"
+        elif route == "/api/report.json":
+            body = json.dumps(
+                report.build(session), indent=2, default=str
+            ).encode("utf-8")
+            ctype, filename = "application/json", f"autef2-{name}.json"
+        else:
+            body = report.render_html(report.build(session)).encode("utf-8")
+            ctype, filename = "text/html; charset=utf-8", f"autef2-{name}.html"
+
+        self.send_response(200)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+
     def _static(self, path: str) -> None:
         name = "index.html" if path in ("/", "") else path.lstrip("/")
         target = (STATIC_DIR / name).resolve()
@@ -679,14 +811,36 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self) -> None:  # noqa: N802
-        if self.path.split("?", 1)[0] == "/api/state":
+        route, _, query = self.path.partition("?")
+
+        if route == "/api/state":
             session = self._session()
             if session is None:
                 self._json({"error": "not signed in"}, 401)
                 return
             self._json(_snapshot(session))
             return
-        self._static(self.path.split("?", 1)[0])
+
+        if route in ("/api/report.html", "/api/report.json", "/api/project.zip"):
+            session = self._session()
+            if session is None:
+                self._json({"error": "not signed in"}, 401)
+                return
+            if "layout" not in session.state:
+                self._json({"error": "Run stage 1 first."}, 400)
+                return
+            self._download(session, route)
+            return
+
+        if route == "/api/file":
+            session = self._session()
+            if session is None:
+                self._json({"error": "not signed in"}, 401)
+                return
+            self._json(*_read_project_file(session, parse_qs(query).get("path", [""])[0]))
+            return
+
+        self._static(route)
 
     def do_POST(self) -> None:  # noqa: N802
         route = self.path.split("?", 1)[0]
@@ -736,7 +890,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": "Give a URL or a path."}, 400)
                 return
             session.source = value
-            session.source_label = value.rstrip("/").rsplit("/", 1)[-1]
+            session.source_label = _label_for(value)
             session.reset_pipeline()
             self._json(_snapshot(session))
             return

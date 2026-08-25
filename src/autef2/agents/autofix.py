@@ -310,6 +310,13 @@ def _extract_from_text(text: str, failure: TestFailure) -> Optional[str]:
     return None
 
 
-def _preview(code: str, limit: int = 600) -> str:
+def _preview(code: str, limit: int = 8000) -> str:
+    """The patched test function, kept whole.
+
+    This is the evidence that a repair happened and what it changed, so it is
+    stored in full rather than as a snippet. At 600 characters most repaired
+    functions were cut mid-body, which is exactly where the interesting part
+    is. The cap is a guard against a pathological reply, not a display budget.
+    """
     code = code.strip()
     return code if len(code) <= limit else code[:limit] + "\n...[truncated]"

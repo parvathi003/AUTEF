@@ -875,146 +875,142 @@ def test_comparison_report_names_what_v1_could_not_reach():
     assert "Cost per fix" in text
 
 
+
 # ---------------------------------------------------------------------------
-# the stagewise UI
+# the web front end
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture
-def app_test():
-    streamlit_testing = pytest.importorskip("streamlit.testing.v1")
-    ui = Path(__file__).resolve().parent.parent / "src" / "autef2" / "ui.py"
-    return streamlit_testing.AppTest.from_file(str(ui), default_timeout=180)
+def _session(tmp_path, source):
+    """A signed-in session pointed at a project, without going through HTTP."""
+    from autef2.web import server
+
+    s = server.Session("tester")
+    s.workspace = tmp_path / "ws"
+    s.source = str(source)
+    s.settings["use_venv"] = False
+    return s
 
 
-def test_app_starts_clean(app_test):
-    app_test.run()
-    assert not app_test.exception
-
-
-def test_app_shows_one_numbered_sequence(app_test, tmp_path):
+def test_web_ui_offers_one_numbered_sequence_of_nine():
     """v1's phases are stages of this pipeline, not a side menu.
 
-    Generation, coverage and mutation used to sit in their own row that "Run
-    all stages" skipped, which read as a repair tool with extras bolted on.
-    They are stages 4, 7 and 8 of one sequence now, and the order is load
-    bearing: generation feeds the repair loop, and mutation refuses to score a
-    suite that is not green, so it has to follow repair.
+    Generation, coverage and mutation are stages 4, 7 and 8 of one sequence,
+    and the order is load bearing: generation feeds the repair loop, and
+    mutation refuses to score a suite that is not green.
     """
+    from autef2.web import server
+
+    assert list(server.STAGE_NAMES) == list(range(1, 10))
+    assert server.STAGE_NAMES[4] == "Generate tests"
+    assert server.STAGE_NAMES[7] == "Coverage"
+    assert server.STAGE_NAMES[8] == "Mutation"
+    # Only these call the model, so the rest are free to demonstrate.
+    assert server.BILLED_STAGES == {4, 5, 6, 7, 8}
+
+
+def test_web_ui_ships_no_evaluation_tabs():
+    """The comparison and the benchmark are run offline for the report.
+
+    Leaving them in the product UI invites a live run of an experiment that
+    takes minutes per project and costs real money.
+    """
+    from autef2.web import server
+
+    page = (server.STATIC_DIR / "index.html").read_text(encoding="utf-8").lower()
+    script = (server.STATIC_DIR / "app.js").read_text(encoding="utf-8").lower()
+    for banned in ("benchmark", "v1 vs v2", "mcnemar"):
+        assert banned not in page, f"{banned!r} is still in the page"
+        assert banned not in script, f"{banned!r} is still in the script"
+
+
+def test_web_ui_gates_every_stage_until_its_input_exists(tmp_path):
+    from autef2.web import server
+
+    s = server.Session("tester")
+    assert server._blocked_reason(s, 1), "no project chosen yet"
+
+    s.source = str(SAMPLE_PROJECT)
+    assert server._blocked_reason(s, 1) is None
+    for stage in range(2, 10):
+        assert server._blocked_reason(s, stage), f"stage {stage} must be blocked"
+
+
+def test_web_ui_runs_stages_one_to_three_without_a_model(tmp_path):
+    """Ingest, environment and the suite cost nothing, so scope can be checked
+    for free before any spending starts."""
+    from autef2.web import server
+
     project = tmp_path / "project"
     _copy_sample(project)
+    s = _session(tmp_path, project)
 
-    app_test.run()
-    app_test.radio[0].set_value("Path on this machine").run()
-    app_test.text_input[0].set_value(str(project)).run()
-    assert not app_test.exception
+    for stage in (1, 2, 3):
+        server._run_stage(s, stage)
+        assert s.error is None, f"stage {stage}: {s.error}"
+        assert s.done.get(stage)
 
-    numbered = [b.label for b in app_test.button if b.label[:1].isdigit()]
-    assert numbered == [
-        "1. Ingest",
-        "2. Environment",
-        "3. Run suite",
-        "4. Generate tests",
-        "5. Diagnose",
-        "6. Repair & verify",
-        "7. Coverage",
-        "8. Mutation",
-        "9. Report",
-    ]
-
-
-def test_app_stages_one_to_three_run_without_a_model(app_test, tmp_path):
-    """The scope check works with no API key, which is the point of stage 3."""
-    project = tmp_path / "project"
-    _copy_sample(project)
-
-    app_test.run()
-    app_test.radio[0].set_value("Path on this machine").run()
-    app_test.text_input[0].set_value(str(project)).run()
-    assert not app_test.exception
-
-    for label, next_label in (
-        ("1. Ingest", "2. Environment"),
-        ("2. Environment", "3. Run suite"),
-        ("3. Run suite", "4. Generate tests"),
-    ):
-        _click(app_test, label).run()
-        assert not app_test.exception, f"stage {label} raised"
-        # The button row is drawn before the stage runs, so without a re-run
-        # the next stage stays disabled and the user is stuck on a dead button.
-        assert not _button(app_test, next_label).disabled, (
-            f"{next_label} should be enabled once {label} has produced its state"
-        )
-
-    # Generation is stage 4, but it is not the only thing stage 3 unlocks: the
-    # repair path stays reachable for a project that needs no new tests.
-    assert not _button(app_test, "5. Diagnose").disabled
-
-    state = app_test.session_state
-    assert state["layout"].layout_style == "src"
-    assert state["environment"].python
-    # The fixture's suite has two passing and two deliberately broken tests.
-    assert len(state["before"].passed) == 2
-    assert len(state["failures"]) == 2
-    assert all(f.test_file for f in state["failures"]), "test files must resolve"
+    snapshot = server._snapshot(s)
+    # The name comes from the project's own metadata, not the directory it was
+    # dropped into -- the fixture declares itself as calcpkg.
+    assert snapshot["layout"]["name"] == "calcpkg"
+    assert snapshot["layout"]["style"] == "src"
+    assert snapshot["before"]["passed"] == 2
+    assert snapshot["before"]["failed"] == 2
+    assert len(snapshot["failures"]) == 2
+    assert snapshot["usage"]["calls"] == 0, "stages 1 to 3 must not call the model"
+    assert server._blocked_reason(s, 5) is None, "diagnosis is now reachable"
 
 
-def test_app_says_a_project_has_no_tests_rather_than_nothing_to_fix(
-    app_test, tmp_path
-):
+def test_web_ui_says_a_project_has_no_tests_rather_than_nothing_to_fix(tmp_path):
     """A repo with no test suite is not a repo whose tests all pass.
 
-    MemerSala's case: three .py files, no tests. Reporting "nothing is failing"
-    reads as success and sends the user looking for a bug that is not there.
+    Reporting "nothing is failing" for one reads as success and sends the
+    reader looking for a bug that is not there.
     """
+    from autef2.web import server
+
     project = tmp_path / "webapp"
     project.mkdir()
-    (project / "app.py").write_text("def index():\n    return 'hi'\n", encoding="utf-8")
+    (project / "app.py").write_text(
+        "def index():\n    return 'hi'\n", encoding="utf-8"
+    )
+    s = _session(tmp_path, project)
 
-    app_test.run()
-    app_test.radio[0].set_value("Path on this machine").run()
-    app_test.text_input[0].set_value(str(project)).run()
-    for label in ("1. Ingest", "2. Environment", "3. Run suite"):
-        _click(app_test, label).run()
+    for stage in (1, 2, 3):
+        server._run_stage(s, stage)
+        assert s.error is None, f"stage {stage}: {s.error}"
 
-    assert not app_test.exception
-    assert app_test.session_state["layout"].test_files == []
-    warnings = " ".join(str(w.value) for w in app_test.warning)
-    assert "no test files" in warnings.lower()
-    assert "does not write new ones" in warnings
-    assert not app_test.success, "an empty project is not a success state"
+    snapshot = server._snapshot(s)
+    assert snapshot["layout"]["test_files"] == 0
+    assert snapshot["layout"]["no_tests"] is True, (
+        "the page must be able to say the project ships no tests"
+    )
+    assert snapshot["before"]["failed"] == 0
+    assert server._blocked_reason(s, 5), "there is nothing to diagnose"
 
 
-def test_app_refuses_repair_stages_without_a_key(app_test, tmp_path, monkeypatch):
-    """A model-driven stage must explain that a key is needed, not raise.
+def test_web_ui_reports_a_missing_key_rather_than_raising(tmp_path, monkeypatch):
+    """A model-driven stage must explain that a key is needed, not crash."""
+    from autef2.web import server
 
-    Checked on both of the stages that stage 3 unlocks: generation is the first
-    one in the sequence, diagnosis the first of the repair loop.
-    """
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    # The machine running the tests may have a key configured; the behaviour
-    # under test is what happens when it does not.
     monkeypatch.setattr("autef2.config.resolve_api_key", lambda: None)
-    monkeypatch.setattr("autef2.ui.resolve_api_key", lambda: None)
 
     project = tmp_path / "project"
     _copy_sample(project)
+    s = _session(tmp_path, project)
+    for stage in (1, 2, 3):
+        server._run_stage(s, stage)
 
-    app_test.run()
-    app_test.radio[0].set_value("Path on this machine").run()
-    app_test.text_input[0].set_value(str(project)).run()
-    for label in ("1. Ingest", "2. Environment", "3. Run suite"):
-        _click(app_test, label).run()
+    server._run_stage(s, 5)
 
-    for label in ("4. Generate tests", "5. Diagnose"):
-        _click(app_test, label).run()
-        assert not app_test.exception
-        assert any("API key" in str(element.value) for element in app_test.error), (
-            f"{label} must say a key is needed rather than raising"
-        )
+    assert s.error, "a stage without a key must set an error"
+    assert "key" in s.error.lower(), s.error
+    assert not s.done.get(5)
+    assert s.running is None, "the worker must release the stage on failure"
 
 
-# ---------------------------------------------------------------------------
 # helpers
 # ---------------------------------------------------------------------------
 
@@ -1025,12 +1021,89 @@ def _copy_sample(destination: Path) -> None:
     shutil.copytree(SAMPLE_PROJECT, destination)
 
 
-def _button(app_test, label: str):
-    for button in app_test.button:
-        if button.label == label:
-            return button
-    raise AssertionError(f"no button labelled {label!r}")
+def test_web_ui_serves_generated_files_only_from_the_project(tmp_path):
+    """The code viewer reads a path the browser supplies.
+
+    Signing in must not become a way to read the rest of the machine through a
+    text box, so the path is confined to the working copy -- and the working
+    copy is a throwaway, not the caller's own directory.
+    """
+    from autef2.web import server
+
+    project = tmp_path / "project"
+    _copy_sample(project)
+    s = _session(tmp_path, project)
+    server._run_stage(s, 1)
+    assert s.error is None
+
+    payload, status = server._read_project_file(s, "tests/test_operations.py")
+    assert status == 200, payload
+    assert "TestCalculator" in payload["content"]
+    assert payload["lines"] > 0
+
+    for outside in ("../../../../Windows/win.ini", "..", r"C:\Windows\win.ini"):
+        payload, status = server._read_project_file(s, outside)
+        assert status in (403, 404), f"{outside!r} returned {status}"
+        assert "content" not in payload
+
+    payload, status = server._read_project_file(s, "tests/nope.py")
+    assert status == 404
 
 
-def _click(app_test, label: str):
-    return _button(app_test, label).click()
+@pytest.mark.parametrize(
+    "source, expected",
+    [
+        (r"C:\Users\me\projects\sample_project", "sample_project"),
+        ("https://github.com/astanin/python-tabulate", "python-tabulate"),
+        ("https://github.com/psf/requests.git", "requests"),
+        ("/home/me/projects/boltons/", "boltons"),
+        ("C:/Users/me/thing.zip", "thing"),
+        ("", "project"),
+    ],
+)
+def test_web_ui_names_a_project_from_a_windows_path_too(source, expected):
+    """Splitting on "/" alone made a Windows path its own project name.
+
+    That name becomes a directory under the workspace, and
+    ``projects_dir / "<absolute path>"`` collapses back onto the original --
+    which is how a run once seeded faults into the caller's own directory
+    instead of a working copy.
+    """
+    from autef2.web.server import _label_for
+
+    assert _label_for(source) == expected
+
+
+def test_web_ui_report_carries_the_generated_code(tmp_path):
+    """A report that says "4 tests generated" without showing them cannot be
+    checked by the person reading it."""
+    from autef2.web import report, server
+
+    project = tmp_path / "project"
+    _copy_sample(project)
+    s = _session(tmp_path, project)
+    for stage in (1, 2, 3):
+        server._run_stage(s, stage)
+        assert s.error is None, f"stage {stage}: {s.error}"
+
+    data = report.build(s)
+    assert data["project"]
+    assert data["before"]["failed"] == 2
+
+    page = report.render_html(data)
+    assert page.startswith("<!doctype html>")
+    assert "Stage 3 — the suite as it arrived" in page
+    assert "Weakening rate is reported beside fix rate" in page
+    # No external anything: it has to open from a file, offline.
+    for forbidden in ("http://", "https://", "<script"):
+        assert forbidden not in page, f"report is not self-contained: {forbidden}"
+
+    blob = report.build_zip(s)
+    import io, zipfile
+
+    with zipfile.ZipFile(io.BytesIO(blob)) as archive:
+        names = archive.namelist()
+    assert "autef2-report.html" in names
+    assert "autef2-report.json" in names
+    assert any(n.startswith("project/") for n in names)
+    assert not any("__pycache__" in n or ".venv" in n for n in names)
