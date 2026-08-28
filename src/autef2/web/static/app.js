@@ -267,55 +267,154 @@
   });
 
 
-  /* ---------------------------- code viewer ------------------------- */
+  /* ---------------------------- code viewer -------------------------
 
-  var openFiles = {};
+     A generated suite is one file, but the interesting unit is one test. So a
+     file is listed as a header and each test it contains becomes its own
+     block, collapsed, opening to just that test's code -- the same disclosure
+     the repair table uses for the code an attempt wrote.
 
-  function fileRow(entry, key) {
-    var id = "f_" + key.replace(/[^a-z0-9]/gi, "_");
+     File contents are fetched once per path and cached: /api/state polls every
+     1.5 seconds and re-renders, and re-reading the file each time would be
+     pointless traffic. */
+
+  var fileCache = {};
+  var pending = {};
+  var openBlocks = {};
+
+  function fetchFile(path) {
+    if (fileCache[path] !== undefined || pending[path]) return;
+    pending[path] = true;
+    fetch("/api/file?path=" + encodeURIComponent(path),
+          { headers: { "X-Autef-Token": token } })
+      .then(function (r) { return r.json(); })
+      .then(function (d) { fileCache[path] = d.error ? "" : d.content; })
+      .catch(function () { fileCache[path] = ""; })
+      .finally(function () { delete pending[path]; refresh(); });
+  }
+
+  // Split Python source into its top-level definitions. Deliberately simple:
+  // a line starting at column 0 with def or class opens a block that runs to
+  // the next one. Everything before the first is the file's imports and setup.
+  function splitTests(source) {
+    var lines = String(source || "").split("\n");
+    var blocks = [];
+    var header = [];
+    var current = null;
+
+    lines.forEach(function (line) {
+      var match = /^(def|class)\s+([A-Za-z_]\w*)/.exec(line);
+      if (match) {
+        if (current) blocks.push(current);
+        current = { kind: match[1], name: match[2], lines: [line] };
+      } else if (current) {
+        current.lines.push(line);
+      } else {
+        header.push(line);
+      }
+    });
+    if (current) blocks.push(current);
+
+    blocks.forEach(function (b) {
+      b.code = b.lines.join("\n").replace(/\s+$/, "");
+      b.tests = b.kind === "class"
+        ? (b.code.match(/def\s+test\w*/g) || []).length
+        : 1;
+    });
+    return {
+      header: header.join("\n").trim(),
+      blocks: blocks.filter(function (b) { return b.code.trim(); })
+    };
+  }
+
+  function disclosure(id, title, meta, code, tone) {
+    var open = !!openBlocks[id];
+    return '<div class="block">' +
+      '<button class="blockhead' + (tone ? " " + tone : "") +
+        '" data-block="' + id + '">' +
+        '<span class="caret">' + (open ? "\u25be" : "\u25b8") + "</span>" +
+        '<span class="btitle mono">' + title + "</span>" +
+        (meta ? '<span class="bmeta">' + meta + "</span>" : "") +
+      "</button>" +
+      '<pre class="code" data-body="' + id + '"' + (open ? "" : " hidden") + ">" +
+        esc(code) + "</pre></div>";
+  }
+
+  // Render a code listing with line numbers, marking the line the traceback
+  // blamed. Seeing *which* line broke is the point; a bare node id is not.
+  function listing(code, startLine, errorLine) {
+    return String(code || "").split("\n").map(function (line, i) {
+      var n = (startLine || 1) + i;
+      var bad = errorLine && n === errorLine;
+      return '<div class="cl' + (bad ? " bad" : "") + '">' +
+        '<span class="ln">' + n + "</span>" +
+        '<span class="lt">' + (esc(line) || "&nbsp;") + "</span></div>";
+    }).join("");
+  }
+
+  function disclosureHtml(id, title, meta, bodyHtml, tone) {
+    var open = !!openBlocks[id];
+    return '<div class="block">' +
+      '<button class="blockhead' + (tone ? " " + tone : "") +
+        '" data-block="' + id + '">' +
+        '<span class="caret">' + (open ? "▾" : "▸") + "</span>" +
+        '<span class="btitle mono">' + title + "</span>" +
+        (meta ? '<span class="bmeta">' + meta + "</span>" : "") +
+      "</button>" +
+      '<div class="code listing" data-body="' + id + '"' + (open ? "" : " hidden") + ">" +
+        bodyHtml + "</div></div>";
+  }
+
+  function generatedFile(entry, key) {
     var status = entry.kept
       ? '<span class="tag ok">kept</span>'
       : '<span class="tag bad">rejected</span>';
-    return '<div class="filerow">' +
-      '<button class="filehead" data-path="' + esc(entry.path) + '" data-id="' + id + '"' +
-      (entry.path ? "" : " disabled") + ">" +
-        '<span class="caret">' + (openFiles[id] ? "▾" : "▸") + "</span>" +
-        '<span class="mono fname">' + esc(entry.file || "(not written)") + "</span>" +
-        status +
-        '<span class="fmeta">' + entry.collected + " collected, " +
-          entry.passing + " passing</span>" +
-      "</button>" +
-      (entry.error ? '<div class="ferror">' + esc(entry.error) + "</div>" : "") +
-      '<pre class="code" id="' + id + '"' + (openFiles[id] ? "" : " hidden") + ">" +
-        (openFiles[id] || "") + "</pre></div>";
+
+    var head = '<div class="fileband">' +
+      '<span class="mono fname">' + esc(entry.file || "(not written)") + "</span>" +
+      status +
+      '<span class="fmeta">' + entry.collected + " collected, " +
+        entry.passing + " passing</span></div>" +
+      (entry.error ? '<div class="ferror">' + esc(entry.error) + "</div>" : "");
+
+    if (!entry.path) return '<div class="filegroup">' + head + "</div>";
+
+    fetchFile(entry.path);
+    var source = fileCache[entry.path];
+    if (source === undefined) {
+      return '<div class="filegroup">' + head +
+        '<p class="hint" style="margin:8px 0 0">Reading the file...</p></div>';
+    }
+
+    var parsed = splitTests(source);
+    var body = parsed.blocks.map(function (b, i) {
+      var meta = b.kind === "class" ? b.tests + " test(s)" : "test case";
+      return disclosure(key + "_t" + i,
+        esc(b.kind + " " + b.name), meta, b.code);
+    }).join("");
+
+    if (parsed.header) {
+      body += disclosure(key + "_hdr", "imports and setup", "", parsed.header);
+    }
+    if (!parsed.blocks.length) {
+      body = '<p class="hint" style="margin:8px 0 0">Nothing was written.</p>';
+    }
+    return '<div class="filegroup">' + head + body + "</div>";
   }
 
-  function wireFileRows() {
-    Array.prototype.forEach.call(document.querySelectorAll(".filehead"), function (head) {
-      head.addEventListener("click", function () {
-        var id = head.dataset.id;
-        var pre = $(id);
-        if (!pre) return;
-        if (!pre.hidden) {
-          pre.hidden = true;
-          delete openFiles[id];
-          head.querySelector(".caret").textContent = "▸";
-          return;
-        }
-        head.querySelector(".caret").textContent = "▾";
-        pre.hidden = false;
-        if (pre.textContent) return;
-        pre.textContent = "loading...";
-        fetch("/api/file?path=" + encodeURIComponent(head.dataset.path),
-              { headers: { "X-Autef-Token": token } })
-          .then(function (r) { return r.json(); })
-          .then(function (d) {
-            pre.textContent = d.error ? d.error : d.content;
-            openFiles[id] = pre.textContent;
-          })
-          .catch(function () { pre.textContent = "Could not read the file."; });
+  function wireBlocks() {
+    Array.prototype.forEach.call(document.querySelectorAll("[data-block]"),
+      function (head) {
+        head.addEventListener("click", function () {
+          var id = head.dataset.block;
+          var body = document.querySelector('[data-body="' + id + '"]');
+          if (!body) return;
+          var open = body.hidden;
+          body.hidden = !open;
+          head.querySelector(".caret").textContent = open ? "\u25be" : "\u25b8";
+          if (open) { openBlocks[id] = true; } else { delete openBlocks[id]; }
+        });
       });
-    });
   }
 
   /* ----------------------------- results ---------------------------- */
@@ -385,7 +484,7 @@
     if (state.generation) {
       var G = state.generation;
       var rows = G.records.map(function (r, i) {
-        return fileRow(r, "gen" + i);
+        return generatedFile(r, "gen" + i);
       }).join("");
       html += card("Stage 4 — generated tests",
         '<div class="metrics">' +
@@ -403,23 +502,32 @@
       var fixed = state.records.filter(function (r) { return r.fixed; }).length;
       var weak = state.records.filter(function (r) { return r.weakened; }).length;
       var regressed = state.records.filter(function (r) { return r.regression; }).length;
-      var rows2 = state.records.map(function (r) {
+      var rows2 = state.records.map(function (r, i) {
         var strategies = r.attempts.map(function (a) { return a.strategy; }).join(" &rarr; ");
         var status = r.fixed ? '<span class="tag ok">fixed</span>'
           : r.skipped_reason ? '<span class="tag neutral">skipped</span>'
           : '<span class="tag bad">not fixed</span>';
+        var failing = "";
+        if (r.failing) {
+          var f = r.failing;
+          failing = disclosureHtml(
+            "fail" + i,
+            "the failing test",
+            esc((f.exception || "") + (f.message ? ": " + f.message : "")),
+            listing(f.code, f.start_line, f.error_line),
+            "bad");
+        }
         var applied = r.attempts.filter(function (a) { return a.patch; });
-        var patch = applied.length
-          ? '<details class="patch"><summary>the code it wrote (' +
-            applied.length + " attempt" + (applied.length > 1 ? "s" : "") + ")</summary>" +
-            applied.map(function (a) {
-              return '<div class="patchhead">' + a.n + ". " + esc(a.strategy) +
-                (a.verified ? ' <span class="tag ok">verified</span>'
-                            : ' <span class="tag bad">rejected</span>') + "</div>" +
-                '<pre class="code">' + esc(a.patch) + "</pre>";
-            }).join("") + "</details>"
-          : "";
-        return "<tr><td class=\"mono\">" + esc(r.nodeid) + patch + "</td>" +
+        var patch = applied.map(function (a, ai) {
+          return disclosure(
+            "rep" + i + "_" + ai,
+            "attempt " + a.n + ": " + esc(a.strategy),
+            a.verified ? '<span class="tag ok">verified</span>'
+                       : '<span class="tag bad">rejected</span>',
+            a.patch,
+            a.verified ? "good" : "");
+        }).join("");
+        return "<tr><td class=\"mono\">" + esc(r.nodeid) + failing + patch + "</td>" +
           "<td>" + esc(r.cause || "-") + "</td>" +
           "<td>" + status + "</td>" +
           "<td>" + r.attempts.length + "</td>" +
@@ -446,7 +554,7 @@
               metric("Tests written", C.written) +
               (C.repaired ? metric("Failing tests repaired", C.repaired) : "") +
             "</div>" +
-            (C.files || []).map(function (f, i) { return fileRow(f, "cov" + i); }).join("")
+            (C.files || []).map(function (f, i) { return generatedFile(f, "cov" + i); }).join("")
           : '<div class="banner">Coverage could not be measured' +
             (C.error ? ": " + esc(C.error) : "") + "</div>");
     }
@@ -461,7 +569,7 @@
               metric("Newly killed", M.newly_killed) +
               metric("Killer tests kept", M.written) +
             "</div>" +
-            (M.files || []).map(function (f, i) { return fileRow(f, "mut" + i); }).join("")
+            (M.files || []).map(function (f, i) { return generatedFile(f, "mut" + i); }).join("")
           : '<div class="banner info">' + esc(M.skipped_reason || "Not measured.") + "</div>");
     }
 
@@ -504,7 +612,7 @@
     }
 
     $("results").innerHTML = html;
-    wireFileRows();
+    wireBlocks();
     wireDownloads();
   }
 

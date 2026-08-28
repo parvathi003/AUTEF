@@ -16,6 +16,7 @@ from __future__ import annotations
 import html
 import io
 import json
+import re
 import time
 import zipfile
 from pathlib import Path
@@ -84,14 +85,95 @@ def _metric(label: str, value: Any, note: str = "") -> str:
     )
 
 
-def _code_block(title: str, subtitle: str, body: str) -> str:
+def _code_block(title: str, subtitle: str, body: str, *, open_: bool = False) -> str:
+    """One collapsible disclosure. ``details`` so it needs no JavaScript."""
     if not body:
         return ""
     return (
-        '<div class="file"><div class="fh"><b>' + _e(title) + "</b>"
-        '<span>' + _e(subtitle) + "</span></div>"
-        "<pre>" + _e(body) + "</pre></div>"
+        '<details class="block"' + (" open" if open_ else "") + ">"
+        "<summary><b>" + _e(title) + "</b>"
+        + ("<span>" + _e(subtitle) + "</span>" if subtitle else "")
+        + "</summary><pre>" + _e(body) + "</pre></details>"
     )
+
+
+def _listing(code: str, start_line: int, error_line: Optional[int]) -> str:
+    """A numbered code listing with the blamed line marked.
+
+    The traceback names a line; showing it in place is the difference between
+    "this test failed" and "this is what failed, and here."
+    """
+    rows = []
+    for offset, line in enumerate(str(code or "").split("\n")):
+        number = (start_line or 1) + offset
+        bad = error_line is not None and number == error_line
+        rows.append(
+            '<div class="cl' + (" bad" if bad else "") + '">'
+            '<span class="ln">' + str(number) + "</span>"
+            '<span class="lt">' + (_e(line) or "&nbsp;") + "</span></div>"
+        )
+    return '<div class="listing">' + "".join(rows) + "</div>"
+
+
+def _failing_block(record: Dict[str, Any], index: int) -> str:
+    """The test as it stood when it failed, with the error line marked."""
+    failing = record.get("failing")
+    if not failing or not failing.get("code"):
+        return ""
+    subtitle = str(failing.get("exception") or "")
+    if failing.get("message"):
+        subtitle += ": " + str(failing["message"])
+    return (
+        '<details class="block failing" open><summary><b>the failing test</b>'
+        "<span>" + _e(subtitle) + "</span></summary>"
+        + _listing(
+            failing.get("code", ""),
+            failing.get("start_line") or 1,
+            failing.get("error_line"),
+        )
+        + "</details>"
+    )
+
+
+def _band(title: str, subtitle: str) -> str:
+    """The header a group of disclosures hangs from."""
+    return (
+        '<div class="fileband"><b>' + _e(title) + "</b>"
+        "<span>" + _e(subtitle) + "</span></div>"
+    )
+
+
+def _split_tests(source: str):
+    """Top-level definitions in a Python file, plus whatever precedes them.
+
+    A generated suite is one file, but the unit worth reading is one test, so
+    they are listed separately rather than as a single wall of code.
+    """
+    header: List[str] = []
+    blocks: List[Dict[str, Any]] = []
+    current: Optional[Dict[str, Any]] = None
+
+    for line in str(source or "").split("\n"):
+        match = re.match(r"^(def|class)\s+([A-Za-z_]\w*)", line)
+        if match:
+            if current:
+                blocks.append(current)
+            current = {"kind": match.group(1), "name": match.group(2), "lines": [line]}
+        elif current:
+            current["lines"].append(line)
+        else:
+            header.append(line)
+    if current:
+        blocks.append(current)
+
+    for block in blocks:
+        block["code"] = "\n".join(block["lines"]).rstrip()
+        block["tests"] = (
+            len(re.findall(r"def\s+test\w*", block["code"]))
+            if block["kind"] == "class"
+            else 1
+        )
+    return "\n".join(header).strip(), [b for b in blocks if b["code"].strip()]
 
 
 def _written_section(heading: str, entries: List[Dict[str, Any]], note: str) -> str:
@@ -106,10 +188,20 @@ def _written_section(heading: str, entries: List[Dict[str, Any]], note: str) -> 
         )
         if entry.get("error"):
             subtitle += " · " + str(entry["error"])[:160]
-        parts.append(
-            _code_block(entry.get("file") or "(not written)", subtitle,
-                        entry.get("content", ""))
-        )
+        parts.append(_band(entry.get("file") or "(not written)", subtitle))
+
+        head, tests = _split_tests(entry.get("content", ""))
+        for block in tests:
+            meta = (
+                f"{block['tests']} test(s)" if block["kind"] == "class" else "test case"
+            )
+            parts.append(
+                _code_block(f"{block['kind']} {block['name']}", meta, block["code"])
+            )
+        if head:
+            parts.append(_code_block("imports and setup", "", head))
+        if not tests:
+            parts.append('<p class="note">Nothing was written.</p>')
     return "".join(parts)
 
 
@@ -159,10 +251,29 @@ def render_html(data: Dict[str, Any]) -> str:
  pre {{ margin:0; padding:14px 16px; background:#1b1f27; color:#d7dce5;
         border-radius:0 0 8px 8px; overflow:auto; white-space:pre;
         font-family:Consolas,"Courier New",monospace; font-size:12px; line-height:1.6 }}
- .file {{ margin:10px 0 18px; border:1px solid var(--line); border-radius:8px }}
- .fh {{ display:flex; justify-content:space-between; gap:12px; padding:9px 14px;
-        background:var(--tint); border-radius:8px 8px 0 0; font-size:12.5px }}
- .fh span {{ color:var(--muted) }}
+ .fileband {{ display:flex; justify-content:space-between; gap:12px;
+        padding:9px 14px; margin-top:14px; background:var(--tint);
+        border:1px solid var(--line); border-bottom:none;
+        border-radius:8px 8px 0 0; font-size:12.5px }}
+ .fileband span {{ color:var(--muted) }}
+ details.block {{ border:1px solid var(--line); border-top:none }}
+ details.block:last-of-type {{ border-radius:0 0 8px 8px }}
+ details.block > summary {{ display:flex; justify-content:space-between;
+        gap:12px; padding:8px 14px; cursor:pointer; font-size:12.5px;
+        font-family:Consolas,"Courier New",monospace }}
+ details.block > summary:hover {{ background:var(--tint) }}
+ details.block > summary span {{ color:var(--muted); font-size:11.5px;
+        font-family:"Segoe UI",Roboto,Arial,sans-serif }}
+ details.block > pre {{ border-radius:0 }}
+ details.block.failing > summary {{ border-left:3px solid var(--red) }}
+ .listing {{ padding:10px 0; background:#1b1f27; color:#d7dce5;
+        font-family:Consolas,"Courier New",monospace; font-size:12px;
+        line-height:1.62; overflow-x:auto }}
+ .cl {{ display:flex; gap:12px; padding:0 14px }}
+ .cl .ln {{ flex:0 0 auto; min-width:30px; text-align:right; color:#6b7684 }}
+ .cl .lt {{ white-space:pre }}
+ .cl.bad {{ background:rgba(255,90,80,.17); box-shadow:inset 3px 0 0 #ff6b5e }}
+ .cl.bad .ln {{ color:#ff9c92; font-weight:700 }}
  .tag {{ display:inline-block; padding:1px 8px; border-radius:20px; font-size:11px }}
  .ok {{ background:#dff3e0; color:#17501a }} .bad {{ background:#ffdad6; color:#5b0e0e }}
  .neutral {{ background:#e8eaf1; color:#44474e }}
@@ -263,16 +374,24 @@ def render_html(data: Dict[str, Any]) -> str:
         add('<p class="note">Escalation is the contribution: when a fix does not '
             "verify, the next attempt uses a different strategy rather than "
             "repeating the same one.</p>")
-        for r in records:
-            for a in r.get("attempts") or []:
-                if not a.get("patch"):
-                    continue
+        for index, r in enumerate(records):
+            attempts = [a for a in r.get("attempts") or [] if a.get("patch")]
+            if not attempts and not r.get("failing"):
+                continue
+            add(_band(
+                r.get("nodeid"),
+                f"{len(attempts)} attempt(s) · {r.get('cause') or 'unknown cause'}",
+            ))
+            add(_failing_block(r, index))
+            for a in attempts:
                 verdict = "verified" if a.get("verified") else "rejected"
                 if a.get("rejected"):
                     verdict += " — " + str(a["rejected"])[:160]
+                # The one that worked opens by default; the rest are there to
+                # show what was tried first.
                 add(_code_block(
-                    f"{r.get('nodeid')}  ·  attempt {a.get('n')}: {a.get('strategy')}",
-                    verdict, a.get("patch", "")))
+                    f"attempt {a.get('n')}: {a.get('strategy')}",
+                    verdict, a.get("patch", ""), open_=bool(a.get("verified"))))
 
     # -- stage 7 ----------------------------------------------------------
     if cov:

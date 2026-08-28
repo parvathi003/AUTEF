@@ -138,18 +138,22 @@ class Session:
         """Drop everything a later stage derived, so the page cannot lie."""
         order = {
             1: ("layout", "environment", "before", "failures", "records", "after",
-                "orchestrator", "baseline_passing", "generation", "coverage",
+                "orchestrator", "baseline_passing", "failing_source", "generation",
+                "coverage",
                 "mutation"),
             2: ("environment", "before", "failures", "records", "after",
-                "orchestrator", "baseline_passing", "generation", "coverage",
+                "orchestrator", "baseline_passing", "failing_source", "generation",
+                "coverage",
                 "mutation"),
             3: ("before", "failures", "records", "after", "baseline_passing",
+                "failing_source",
                 "generation", "coverage", "mutation"),
             # Stage 4 keeps ``before``: it describes the project as it arrived,
             # and generation adds files after that snapshot was taken.
             4: ("generation", "failures", "records", "after", "baseline_passing",
+                "failing_source",
                 "coverage", "mutation"),
-            5: ("records", "after"),
+            5: ("records", "failing_source", "after"),
             6: ("after",),
             7: ("coverage", "coverage_repaired", "mutation", "after"),
             8: ("mutation", "after"),
@@ -292,14 +296,64 @@ def _orchestrator(session: Session, config):
     return st["orchestrator"]
 
 
+def _capture_failing_source(failure) -> Optional[Dict[str, Any]]:
+    """The test function as it stood when it failed, and the line that broke.
+
+    Captured at diagnosis, not at render time: by the time the page asks, the
+    repair loop may have rewritten the function, and showing the repaired code
+    next to the original error would be actively misleading.
+    """
+    from ..patcher import find_function
+
+    if not failure.test_file or not failure.test_function:
+        return None
+    try:
+        span = find_function(
+            failure.test_file, failure.test_function, failure.test_class
+        )
+    except Exception:  # pragma: no cover - a file we cannot parse
+        span = None
+    if span is None:
+        return None
+
+    # The deepest frame pointing at the test file is where it went wrong;
+    # frames below that are inside the library under test.
+    #
+    # pytest reports frame paths relative to the project root ("tests\\x.py")
+    # while the resolver stores an absolute one, so comparing them directly
+    # never matches. Compare on the tail of the path instead, and require the
+    # line to fall inside the function we are showing.
+    error_line = None
+    wanted = PurePath(str(failure.test_file)).name
+    for frame in failure.frames:
+        if PurePath(str(frame.path).replace("\\", "/")).name != wanted:
+            continue
+        if span.start_line <= frame.lineno <= span.end_line:
+            error_line = frame.lineno
+
+    return {
+        "code": span.source,
+        "start_line": span.start_line,
+        "error_line": error_line,
+        "exception": failure.exception_type,
+        "message": (failure.exception_message or "")[:400],
+        "file": Path(failure.test_file).name,
+    }
+
+
 def _stage_diagnose(session: Session, config) -> None:
     session.reset_from(5)
     st = session.state
     orchestrator = _orchestrator(session, config)
     records = {}
+    sources = {}
     for failure in st.get("failures") or []:
         records[failure.nodeid] = orchestrator.diagnose(failure)
+        captured = _capture_failing_source(failure)
+        if captured:
+            sources[failure.nodeid] = captured
     st["records"] = records
+    st["failing_source"] = sources
     st.pop("coverage_repaired", None)
 
 
@@ -326,13 +380,18 @@ def _repair_pass(session: Session, config, *, merge: bool) -> None:
     st = session.state
     orchestrator = _orchestrator(session, config)
     records = dict(st.get("records") or {}) if merge else {}
+    sources = dict(st.get("failing_source") or {}) if merge else {}
     baseline_passing = st.get("baseline_passing") or []
     for failure in st.get("failures") or []:
         diagnosed = orchestrator.diagnose(failure)
+        captured = _capture_failing_source(failure)
+        if captured:
+            sources[failure.nodeid] = captured
         records[failure.nodeid] = orchestrator.repair(
             failure, baseline_passing, record=diagnosed
         )
     st["records"] = records
+    st["failing_source"] = sources
 
 
 def _stage_coverage(session: Session, config) -> None:
@@ -584,6 +643,7 @@ def _snapshot(session: Session) -> Dict[str, Any]:
             "weakened": bool(r.weakened),
             "regression": bool(r.caused_regression),
             "skipped_reason": r.skipped_reason,
+            "failing": (st.get("failing_source") or {}).get(nodeid),
             "attempts": [
                 {
                     "n": a.attempt,
