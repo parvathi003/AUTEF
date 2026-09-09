@@ -600,3 +600,56 @@ def test_a_package_with_no_tests_is_not_invisible_to_generation(tmp_path):
 
     sites = Mutator(layout).sites(limit=50)
     assert sites, "nothing to mutate means no mutation score for the library"
+
+
+def test_every_mutant_is_reported_with_what_happened_to_it(tmp_path):
+    """A mutation score is not checkable without the mutants behind it.
+
+    "One survived" invites "which one, and why", and the answer -- the file,
+    the line, the operator, the change itself, and whether a killer test was
+    attempted and rejected -- is what turns a number into a finding. This also
+    pins the pairing: the phase writes one killer test per survivor in order,
+    so an attempt must attach to the mutant it was written for and to no other.
+    """
+    from autef2.web.server import _mutants
+
+    config, layout, env = _one_operator_project(tmp_path)
+
+    # A test that cannot detect anything: the rejection path.
+    useless = "from calc import total\n\n\ndef test_useless():\n    assert total\n"
+    outcome = MutationPhase(layout, env, config, scripted(config, useless)).run(
+        max_mutants=6, max_survivors=1, seed=7
+    )
+    assert outcome.before is not None and outcome.before.measured, outcome.skipped_reason
+
+    rows = _mutants(outcome)
+    assert len(rows) == len(outcome.before.mutants)
+    for row in rows:
+        assert row["file"] and row["line"] and row["operator"]
+        assert row["original"] and row["mutated"]
+        assert row["original"] != row["mutated"], "a mutant must change something"
+
+    attempted = [r for r in rows if r["attempted"]]
+    assert len(attempted) <= 1, "max_survivors=1 means at most one attempt"
+    if attempted:
+        assert attempted[0]["attempt_error"], "a rejected attempt must say why"
+        assert not attempted[0]["killed"]
+
+    # The reason belongs to the one mutant it was written for, not to every
+    # mutant in the same file.
+    assert all(r["attempt_error"] is None for r in rows if not r["attempted"])
+
+
+def test_a_killer_test_that_works_is_marked_against_its_own_mutant(tmp_path):
+    from autef2.web.server import _mutants
+
+    config, layout, env = _one_operator_project(tmp_path)
+    killer = "from calc import total\n\n\ndef test_exact():\n    assert total(2, 3) == 5\n"
+    outcome = MutationPhase(layout, env, config, scripted(config, killer)).run(
+        max_mutants=6, max_survivors=2, seed=7
+    )
+    rows = _mutants(outcome)
+    newly = [r for r in rows if r["killed_after_generation"]]
+    for row in newly:
+        assert row["killed"], "marked as newly killed, so it must read as killed"
+        assert row["attempt_error"] is None

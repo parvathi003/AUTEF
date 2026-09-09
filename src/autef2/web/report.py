@@ -176,6 +176,66 @@ def _split_tests(source: str):
     return "\n".join(header).strip(), [b for b in blocks if b["code"].strip()]
 
 
+def _mutant_table(mutants: List[Dict[str, Any]]) -> str:
+    """Every mutant and its fate, survivors first.
+
+    A mutation score is a claim about a suite's sensitivity, and "one survived"
+    is not a finding until you can say which one and what happened to it. This
+    is the table an examiner needs in order to check the number.
+    """
+    if not mutants:
+        return ""
+
+    survivors = [m for m in mutants if not m.get("killed") and not m.get("error")]
+    unscored = [m for m in mutants if m.get("error")]
+    killed = [m for m in mutants if m.get("killed")]
+
+    rows = []
+    for m in survivors + unscored + killed:
+        if m.get("error"):
+            verdict = '<span class="tag neutral">not scored</span>'
+            note = _e(m["error"])
+        elif m.get("killed"):
+            verdict = '<span class="tag ok">caught</span>'
+            note = ("caught by a test written for it"
+                    if m.get("killed_after_generation")
+                    else "caught by " + _e(str(m.get("killed_by") or "").split("::")[-1]))
+        else:
+            verdict = '<span class="tag bad">survived</span>'
+            if m.get("attempt_error"):
+                note = "killer test rejected — " + _e(m["attempt_error"])
+            elif m.get("attempted"):
+                note = "a killer test was attempted and did not hold"
+            else:
+                note = "no test detects this change; none was attempted"
+        rows.append(
+            "<tr><td class='mono'>" + _e(m.get("file")) + ":" + _e(m.get("line"))
+            + "</td><td>" + _e(m.get("operator")) + "</td>"
+            "<td class='mono diff'><div class='minus'>- " + _e(m.get("original"))
+            + "</div><div class='plus'>+ " + _e(m.get("mutated")) + "</div></td>"
+            "<td>" + verdict + "</td><td>" + note + "</td></tr>"
+        )
+
+    summary = (
+        f"<b>{len(survivors)} mutant(s) survived</b> — the suite did not notice "
+        "these changes. Each is a gap in the tests, unless the change cannot "
+        "alter behaviour at all (an equivalent mutant), which no test can catch."
+        if survivors else "Every mutant was caught."
+    )
+    if unscored:
+        summary += (
+            f" {len(unscored)} could not be scored and are excluded from the "
+            "score rather than counted as caught."
+        )
+
+    return (
+        "<h3>Every mutant, and what happened to it</h3>"
+        "<table><tr><th>Where</th><th>Operator</th><th>The change</th>"
+        "<th>Result</th><th>Detail</th></tr>" + "".join(rows) + "</table>"
+        '<p class="note">' + summary + "</p>"
+    )
+
+
 def _written_section(heading: str, entries: List[Dict[str, Any]], note: str) -> str:
     if not entries:
         return ""
@@ -265,6 +325,9 @@ def render_html(data: Dict[str, Any]) -> str:
  details.block > summary span {{ color:var(--muted); font-size:11.5px;
         font-family:"Segoe UI",Roboto,Arial,sans-serif }}
  details.block > pre {{ border-radius:0 }}
+ td.diff {{ line-height:1.5 }}
+ td.diff .minus {{ color:#b3261e }}
+ td.diff .plus {{ color:#2e7d32 }}
  details.block.failing > summary {{ border-left:3px solid var(--red) }}
  .listing {{ padding:10px 0; background:#1b1f27; color:#d7dce5;
         font-family:Consolas,"Courier New",monospace; font-size:12px;
@@ -425,6 +488,7 @@ def render_html(data: Dict[str, Any]) -> str:
             add('<p class="note">A killer test counts only if it passes on the '
                 "original source and fails with the mutant applied. Passing both "
                 "ways raises the score without testing anything.</p>")
+            add(_mutant_table(mut.get("mutants") or []))
             add(_written_section("The killer tests", mut.get("files") or [], ""))
         else:
             add('<div class="warn">' + _e(mut.get("skipped_reason")

@@ -672,7 +672,9 @@
             ? "caught by " + esc((m.killed_by || "").split("::").pop())
             : m.attempt_error
               ? "killer test rejected — " + esc(m.attempt_error)
-              : "no test detects this change";
+              : m.attempted
+                ? "a killer test was attempted and did not hold"
+                : "no test detects this change; none was attempted";
       return "<tr><td class=\"mono\">" + esc(m.file) + ":" + m.line + "</td>" +
         "<td>" + esc(m.operator) + "</td>" +
         '<td class="mono diff">' +

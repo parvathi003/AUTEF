@@ -583,24 +583,25 @@ def _mutants(outcome) -> List[Dict[str, Any]]:
     rejected rather than just failing to appear.
     """
     before = outcome.before
-    after = outcome.after or outcome.before
     if before is None or not before.measured:
         return []
+    # ``after`` carries the post-generation state: same mutants, but any that a
+    # written test went on to kill are marked there and not in ``before``.
+    after = outcome.after or before
 
-    # A killer test names the mutant it was written for in its module import;
-    # fall back to matching on the source file it targets.
-    attempts: Dict[str, Any] = {}
-    for record in outcome.records:
-        attempts.setdefault(Path(record.module).name if record.module else "", record)
-
-    killed_after = {
-        (m.file, m.lineno, m.operator) for m in (after.mutants if after else []) if m.killed
+    # The phase writes one killer test per survivor, in order, so records pair
+    # positionally with the survivors it attempted -- and only with those. The
+    # attempt belongs to one mutant; attaching it to every mutant in the file
+    # would report a rejection against mutants nothing was ever written for.
+    attempted = [m for m in before.survivors() if not m.error]
+    attempt_for = {
+        (m.file, m.lineno, m.operator): record
+        for m, record in zip(attempted, outcome.records)
     }
 
     out: List[Dict[str, Any]] = []
-    for mutant in before.mutants:
-        key = (mutant.file, mutant.lineno, mutant.operator)
-        record = attempts.get(Path(mutant.file).name)
+    for mutant in after.mutants:
+        record = attempt_for.get((mutant.file, mutant.lineno, mutant.operator))
         out.append({
             "file": Path(mutant.file).name,
             "line": mutant.lineno,
@@ -609,11 +610,13 @@ def _mutants(outcome) -> List[Dict[str, Any]]:
             "mutated": mutant.mutated,
             "killed": mutant.killed,
             "killed_by": mutant.killed_by,
-            # A survivor the suite could not judge at all: not a kill, and not
-            # a gap in the tests either.
+            # A mutant the suite could not judge at all: not a kill, and not a
+            # gap in the tests either, so it is excluded from the score.
             "error": mutant.error,
-            "killed_after_generation": key in killed_after and not mutant.killed,
-            # Why the attempt to write a killer test for it did not stand.
+            "killed_after_generation": mutant.killed_after_generation,
+            # Whether a killer test was attempted for this mutant, and if it was
+            # rejected, why -- the answer to "one survived, what happened".
+            "attempted": record is not None,
             "attempt_error": (
                 record.error if record is not None and not record.accepted else None
             ),
