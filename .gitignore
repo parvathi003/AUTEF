@@ -3,7 +3,11 @@ env
 __pycache__/
 *.pyc
 *.log
-tests/
+# v1 kept its generated suites in a top-level tests/ directory. Anchored to the
+# root, because an unanchored "tests/" matches at every depth -- it silently
+# swallowed tests_autef2/sample_project/tests/, the fixture's deliberately
+# broken suite, and a fresh clone then failed 21 of its own tests.
+/tests/
 #source_files/
 mutation_coverage/
 mutation_coverage_before/

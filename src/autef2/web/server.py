@@ -570,6 +570,57 @@ def _written_files(records) -> List[Dict[str, Any]]:
     ]
 
 
+def _mutants(outcome) -> List[Dict[str, Any]]:
+    """Every mutant, and what happened to it.
+
+    Counts alone cannot be explained. "One survived" invites the question
+    "which one, and why", and the answer -- the file, the line, the operator
+    and the exact change -- is the difference between a reported number and a
+    finding somebody can check.
+
+    Killer tests are matched back to their mutant by file and line, so a
+    survivor that was attempted and rejected carries the reason it was
+    rejected rather than just failing to appear.
+    """
+    before = outcome.before
+    after = outcome.after or outcome.before
+    if before is None or not before.measured:
+        return []
+
+    # A killer test names the mutant it was written for in its module import;
+    # fall back to matching on the source file it targets.
+    attempts: Dict[str, Any] = {}
+    for record in outcome.records:
+        attempts.setdefault(Path(record.module).name if record.module else "", record)
+
+    killed_after = {
+        (m.file, m.lineno, m.operator) for m in (after.mutants if after else []) if m.killed
+    }
+
+    out: List[Dict[str, Any]] = []
+    for mutant in before.mutants:
+        key = (mutant.file, mutant.lineno, mutant.operator)
+        record = attempts.get(Path(mutant.file).name)
+        out.append({
+            "file": Path(mutant.file).name,
+            "line": mutant.lineno,
+            "operator": mutant.operator,
+            "original": mutant.original,
+            "mutated": mutant.mutated,
+            "killed": mutant.killed,
+            "killed_by": mutant.killed_by,
+            # A survivor the suite could not judge at all: not a kill, and not
+            # a gap in the tests either.
+            "error": mutant.error,
+            "killed_after_generation": key in killed_after and not mutant.killed,
+            # Why the attempt to write a killer test for it did not stand.
+            "attempt_error": (
+                record.error if record is not None and not record.accepted else None
+            ),
+        })
+    return out
+
+
 def _snapshot(session: Session) -> Dict[str, Any]:
     from ..config import resolve_api_key
 
@@ -711,6 +762,7 @@ def _snapshot(session: Session) -> Dict[str, Any]:
             "newly_killed": mut.newly_killed,
             "written": len(mut.accepted),
             "files": _written_files(mut.records),
+            "mutants": _mutants(mut),
         }
 
     llm = st.get("llm")

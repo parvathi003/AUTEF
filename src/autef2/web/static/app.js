@@ -569,6 +569,7 @@
               metric("Newly killed", M.newly_killed) +
               metric("Killer tests kept", M.written) +
             "</div>" +
+            mutantTable(M.mutants || []) +
             (M.files || []).map(function (f, i) { return generatedFile(f, "mut" + i); }).join("")
           : '<div class="banner info">' + esc(M.skipped_reason || "Not measured.") + "</div>");
     }
@@ -646,6 +647,56 @@
           .finally(function () { button.disabled = false; button.textContent = label; });
       });
     });
+  }
+
+  // Every mutant and what happened to it. Survivors first: they are the
+  // finding, and "one survived" is not explainable without saying which.
+  function mutantTable(mutants) {
+    if (!mutants.length) return "";
+
+    var survivors = mutants.filter(function (m) { return !m.killed && !m.error; });
+    var unscored = mutants.filter(function (m) { return m.error; });
+    var killed = mutants.filter(function (m) { return m.killed; });
+
+    var row = function (m) {
+      var verdict = m.error
+        ? '<span class="tag neutral">not scored</span>'
+        : m.killed
+          ? '<span class="tag ok">caught</span>'
+          : '<span class="tag bad">survived</span>';
+      var note = m.error
+        ? esc(m.error)
+        : m.killed_after_generation
+          ? "caught by a test written for it"
+          : m.killed
+            ? "caught by " + esc((m.killed_by || "").split("::").pop())
+            : m.attempt_error
+              ? "killer test rejected — " + esc(m.attempt_error)
+              : "no test detects this change";
+      return "<tr><td class=\"mono\">" + esc(m.file) + ":" + m.line + "</td>" +
+        "<td>" + esc(m.operator) + "</td>" +
+        '<td class="mono diff">' +
+          '<div class="minus">- ' + esc(m.original) + "</div>" +
+          '<div class="plus">+ ' + esc(m.mutated) + "</div></td>" +
+        "<td>" + verdict + "</td>" +
+        "<td>" + note + "</td></tr>";
+    };
+
+    var ordered = survivors.concat(unscored, killed);
+    return '<div class="scroll"><table><tr><th>Where</th><th>Operator</th>' +
+      "<th>The change</th><th>Result</th><th>Detail</th></tr>" +
+      ordered.map(row).join("") + "</table></div>" +
+      '<p class="hint" style="margin-bottom:0">' +
+      (survivors.length
+        ? "<b>" + survivors.length + " mutant(s) survived</b> — the suite " +
+          "did not notice these changes. Each is a gap, unless the change " +
+          "cannot alter behaviour at all (an equivalent mutant), which no test " +
+          "can catch."
+        : "Every mutant was caught.") +
+      (unscored.length
+        ? " " + unscored.length + " could not be scored and are excluded from " +
+          "the score rather than counted as caught."
+        : "") + "</p>";
   }
 
   function signed(value, unit) {
