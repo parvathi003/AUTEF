@@ -559,3 +559,58 @@ def test_request_shape_adapts_to_a_reasoning_model():
         "Unsupported parameter: 'max_tokens' is not supported"
     ))
     _QUIRKS.pop(model, None)
+
+
+def test_budget_grows_when_reasoning_eats_it():
+    """A reasoning model that thinks past its budget is retried, not believed.
+
+    ``max_completion_tokens`` covers thinking and writing together, so a budget
+    sized for the answer alone can be spent before a single visible token is
+    emitted. The old code read that empty content as "the model returned
+    nothing" and rejected the test it was asking for.
+    """
+    from autef2.config import AutefConfig
+    from autef2.llm import _MIN_BUDGET, _QUIRKS, LLMClient
+
+    model = "test-budget-model"
+    _QUIRKS.pop(model, None)
+    _MIN_BUDGET.pop(model, None)
+
+    class _Choice:
+        def __init__(self, content, finish):
+            self.message = type("M", (), {"content": content})()
+            self.finish_reason = finish
+
+    class _Response:
+        def __init__(self, content, finish):
+            self.choices = [_Choice(content, finish)]
+            self.usage = None
+
+    calls = []
+
+    class _Completions:
+        def create(self, **kwargs):
+            calls.append(kwargs["max_completion_tokens"])
+            # Starved at the first budget, fine once it is grown.
+            if kwargs["max_completion_tokens"] < 4096:
+                return _Response("", "length")
+            return _Response("def test_ok(): pass", "stop")
+
+    client = LLMClient.__new__(LLMClient)
+    client.config = AutefConfig(model=model, api_key="x", max_output_tokens=1024)
+    client.usage = __import__("autef2.llm", fromlist=["Usage"]).Usage()
+    client._parent = None
+    client._client = type("C", (), {"chat": type("Ch", (), {"completions": _Completions()})()})()
+    _QUIRKS[model] = {"max_completion_tokens"}
+
+    assert client.complete([{"role": "user", "content": "hi"}]) == "def test_ok(): pass"
+    assert calls == [1024, 4096], "the budget should grow once, not thrash"
+    assert _MIN_BUDGET[model] == 4096, "the lesson must stick for later calls"
+
+    # A later call starts at the learned budget rather than re-learning it.
+    calls.clear()
+    client.complete([{"role": "user", "content": "hi"}])
+    assert calls == [4096]
+
+    _QUIRKS.pop(model, None)
+    _MIN_BUDGET.pop(model, None)

@@ -51,6 +51,9 @@ class AutefConfig:
     model: str = DEFAULT_MODEL
     temperature: float = 0.0
     max_output_tokens: int = 2048
+    #: Hard ceiling for a grown budget. A reasoning model is billed for the
+    #: tokens it spends thinking, so a runaway budget is a runaway bill.
+    max_token_ceiling: int = 16384
     api_key: Optional[str] = None
     base_url: Optional[str] = None
     #: How hard a reasoning model should think before answering. Sent only

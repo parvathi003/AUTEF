@@ -149,7 +149,31 @@ class LLMClient:
 
             self._record(response)
             choice = response.choices[0]
-            return (choice.message.content or "").strip()
+            text = (choice.message.content or "").strip()
+            if text:
+                return text
+
+            # Empty content with a length finish means the budget ran out. On
+            # a reasoning model that is the normal failure: max_completion_
+            # tokens covers thinking AND writing, so a budget sized for the
+            # answer alone is spent before a single visible token is emitted.
+            # Grow it and remember, so later calls do not repeat the mistake.
+            if getattr(choice, "finish_reason", None) == "length":
+                grown = min(max_tokens * 4, self.config.max_token_ceiling)
+                if grown > max_tokens:
+                    _MIN_BUDGET[model] = grown
+                    logger.info(
+                        "%s spent its whole %d-token budget reasoning; "
+                        "retrying with %d", model, max_tokens, grown
+                    )
+                    max_tokens = grown
+                    continue
+                raise LLMError(
+                    f"{model} produced no text within {max_tokens} tokens, "
+                    "the configured ceiling. Raise max_token_ceiling, or "
+                    "lower the reasoning effort."
+                )
+            return text
 
         raise LLMError(f"LLM call failed after {retries} attempts: {last_error}")
 
@@ -202,6 +226,7 @@ class LLMClient:
         ``_learn_quirk`` record what came back.
         """
         quirks = _QUIRKS.setdefault(self.config.model, set())
+        max_tokens = max(max_tokens, _MIN_BUDGET.get(self.config.model, 0))
         kwargs: Dict[str, Any] = {
             "model": self.config.model,
             "messages": messages,
@@ -246,6 +271,10 @@ class LLMClient:
 #: Learned once per process, so only the first call to a new model pays the
 #: round trip.
 _QUIRKS: Dict[str, set] = {}
+
+#: Token budgets a model has proven it needs, keyed by model name. A reasoning
+#: model can spend an entire small budget thinking and return nothing at all.
+_MIN_BUDGET: Dict[str, int] = {}
 
 
 def _learn_quirk(model: str, exc: Exception) -> bool:
