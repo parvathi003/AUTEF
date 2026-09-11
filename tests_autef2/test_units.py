@@ -517,3 +517,45 @@ def test_cache_persists_across_instances(tmp_path):
     path = tmp_path / "cache.json"
     SignatureCache(path).record_success("sig", RootCause.IMPORT_ERROR, "fix_import_statement")
     assert SignatureCache(path).lookup("sig") is not None
+
+
+def test_request_shape_adapts_to_a_reasoning_model():
+    """A model that refuses the ordinary parameters is answered, not retried.
+
+    Reasoning models take ``max_completion_tokens`` and reject any temperature
+    but the default. We do not keep a list of which models those are -- the
+    client sends the ordinary shape, reads the rejection and corrects itself.
+    """
+    from autef2.config import AutefConfig
+    from autef2.llm import _QUIRKS, LLMClient, _learn_quirk
+
+    model = "test-reasoning-model"
+    _QUIRKS.pop(model, None)
+    config = AutefConfig(model=model, reasoning_effort="medium", api_key="x")
+    client = LLMClient.__new__(LLMClient)  # no network, no transport needed
+    client.config = config
+
+    first = client._request_kwargs([], 0.0, 512, json_mode=True)
+    assert first["max_tokens"] == 512 and first["temperature"] == 0.0
+
+    assert _learn_quirk(model, Exception(
+        "Unsupported parameter: 'max_tokens' is not supported with this "
+        "model. Use 'max_completion_tokens' instead."
+    ))
+    assert _learn_quirk(model, Exception(
+        "Unsupported value: 'temperature' does not support 0.0 with this "
+        "model. Only the default (1) is supported."
+    ))
+
+    after = client._request_kwargs([], 0.0, 512, json_mode=True)
+    assert after["max_completion_tokens"] == 512
+    assert "max_tokens" not in after and "temperature" not in after
+    assert after["reasoning_effort"] == "medium"
+
+    # An error we cannot answer must fall through to the ordinary retry path
+    # rather than looping, and a rejection already learned is not new.
+    assert not _learn_quirk(model, Exception("429 Rate limit reached"))
+    assert not _learn_quirk(model, Exception(
+        "Unsupported parameter: 'max_tokens' is not supported"
+    ))
+    _QUIRKS.pop(model, None)

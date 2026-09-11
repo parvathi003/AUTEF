@@ -25,6 +25,11 @@ MODEL_PRICING: Dict[str, Dict[str, float]] = {
     "gpt-4o-mini": {"input": 0.150 / 1_000_000, "output": 0.600 / 1_000_000},
     "gpt-4o": {"input": 2.50 / 1_000_000, "output": 10.00 / 1_000_000},
     "gpt-4.1-mini": {"input": 0.40 / 1_000_000, "output": 1.60 / 1_000_000},
+    # Reasoning models. Their billed output includes reasoning tokens, which
+    # the API reports inside completion_tokens, so the arithmetic is unchanged.
+    "gpt-5": {"input": 1.25 / 1_000_000, "output": 10.00 / 1_000_000},
+    "gpt-5-mini": {"input": 0.25 / 1_000_000, "output": 2.00 / 1_000_000},
+    "gpt-5.6-sol": {"input": 4.00 / 1_000_000, "output": 20.00 / 1_000_000},
 }
 
 DEFAULT_MODEL = "gpt-4o-mini"
@@ -48,6 +53,11 @@ class AutefConfig:
     max_output_tokens: int = 2048
     api_key: Optional[str] = None
     base_url: Optional[str] = None
+    #: How hard a reasoning model should think before answering. Sent only
+    #: when set, and dropped automatically by the client for models that
+    #: reject it, so a non-reasoning model can be selected without changing
+    #: this. One of "minimal", "low", "medium", "high".
+    reasoning_effort: Optional[str] = None
 
     # --- repair loop -----------------------------------------------------
     #: Rungs of the escalation ladder to try before giving up on a test.
@@ -118,7 +128,8 @@ class AutefConfig:
     def from_env(cls, **overrides) -> "AutefConfig":
         """Build from environment, with keyword overrides winning.
 
-        Recognised: AUTEF_WORKSPACE, AUTEF_MODEL, AUTEF_MAX_ATTEMPTS,
+        Recognised: AUTEF_WORKSPACE, AUTEF_MODEL, AUTEF_REASONING_EFFORT,
+        AUTEF_MAX_ATTEMPTS,
         AUTEF_USE_VENV, AUTEF_PYTHON, OPENAI_API_KEY, OPENAI_BASE_URL.
         """
         kwargs: Dict[str, object] = {}
@@ -126,6 +137,8 @@ class AutefConfig:
             kwargs["workspace"] = Path(os.environ["AUTEF_WORKSPACE"])
         if os.getenv("AUTEF_MODEL"):
             kwargs["model"] = os.environ["AUTEF_MODEL"]
+        if os.getenv("AUTEF_REASONING_EFFORT"):
+            kwargs["reasoning_effort"] = os.environ["AUTEF_REASONING_EFFORT"]
         if os.getenv("AUTEF_MAX_ATTEMPTS"):
             kwargs["max_attempts"] = int(os.environ["AUTEF_MAX_ATTEMPTS"])
         if os.getenv("AUTEF_USE_VENV"):

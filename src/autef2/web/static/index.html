@@ -115,10 +115,24 @@
           <label class="control">
             <span>Model</span>
             <select id="set-model">
+              <option>gpt-5.6-sol</option>
+              <option>gpt-5</option>
+              <option>gpt-5-mini</option>
               <option>gpt-4o-mini</option>
               <option>gpt-4o</option>
               <option>gpt-4.1-mini</option>
             </select>
+          </label>
+
+          <label class="control">
+            <span>Thinking effort</span>
+            <select id="set-effort">
+              <option value="">Off (non-reasoning models)</option>
+              <option value="low">Low</option>
+              <option value="medium">Medium</option>
+              <option value="high">High</option>
+            </select>
+            <small>Only the GPT-5 models think. Ignored by the others.</small>
           </label>
 
           <label class="control slider">

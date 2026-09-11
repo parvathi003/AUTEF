@@ -184,6 +184,7 @@
   function pushSettings() {
     var payload = {
       model: $("set-model").value,
+      reasoning_effort: $("set-effort").value,
       use_venv: $("set-venv").checked,
       use_cache: $("set-cache").checked
     };
@@ -202,7 +203,7 @@
     $(id).addEventListener("change", pushSettings);
   });
 
-  ["set-model", "set-venv", "set-cache"].forEach(function (id) {
+  ["set-model", "set-effort", "set-venv", "set-cache"].forEach(function (id) {
     $(id).addEventListener("change", pushSettings);
   });
 
@@ -729,6 +730,7 @@
     if (document.activeElement === document.body || document.activeElement === null) {
       var s = state.settings;
       $("set-model").value = s.model;
+      $("set-effort").value = s.reasoning_effort || "";
       $("set-venv").checked = !!s.use_venv;
       $("set-cache").checked = !!s.use_cache;
       Object.keys(SLIDERS).forEach(function (id) {

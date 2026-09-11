@@ -111,21 +111,24 @@ class LLMClient:
         )
         max_tokens = max_tokens or self.config.max_output_tokens
 
-        kwargs: Dict[str, Any] = {
-            "model": self.config.model,
-            "messages": messages,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-        }
-        if json_mode:
-            kwargs["response_format"] = {"type": "json_object"}
-
+        model = self.config.model
         last_error: Optional[Exception] = None
-        for attempt in range(retries):
+        attempt = 0
+        while attempt < retries:
+            kwargs = self._request_kwargs(
+                messages, temperature, max_tokens, json_mode
+            )
             try:
                 response = self._client.chat.completions.create(**kwargs)
             except Exception as exc:  # noqa: BLE001 - SDK raises many types
                 last_error = exc
+                if _learn_quirk(model, exc):
+                    # The model rejected a parameter rather than failing the
+                    # work. Rebuild without it; this does not use up a retry.
+                    logger.info(
+                        "Adapting request shape for %s: %s", model, exc
+                    )
+                    continue
                 if _is_ssl_error(exc):
                     raise LLMError(
                         "TLS handshake failed talking to the OpenAI API. On a "
@@ -134,7 +137,8 @@ class LLMClient:
                         "SSL_CERT_FILE / REQUESTS_CA_BUNDLE at the "
                         f"interceptor's root certificate. Original error: {exc}"
                     ) from exc
-                if attempt == retries - 1:
+                attempt += 1
+                if attempt >= retries:
                     break
                 delay = 2 ** attempt
                 logger.warning(
@@ -183,6 +187,38 @@ class LLMClient:
             f"Model did not return JSON with keys {list(required_keys)}"
         )
 
+    def _request_kwargs(
+        self,
+        messages: Messages,
+        temperature: float,
+        max_tokens: int,
+        json_mode: bool,
+    ) -> Dict[str, Any]:
+        """Build the request, honouring whatever this model has rejected.
+
+        Reasoning models (the GPT-5 family) refuse ``max_tokens`` and refuse
+        any temperature but the default. Rather than keep a list of model
+        names that will go stale, we send the ordinary shape once and let
+        ``_learn_quirk`` record what came back.
+        """
+        quirks = _QUIRKS.setdefault(self.config.model, set())
+        kwargs: Dict[str, Any] = {
+            "model": self.config.model,
+            "messages": messages,
+        }
+        if "no_temperature" not in quirks:
+            kwargs["temperature"] = temperature
+        if "max_completion_tokens" in quirks:
+            kwargs["max_completion_tokens"] = max_tokens
+        else:
+            kwargs["max_tokens"] = max_tokens
+        effort = self.config.reasoning_effort
+        if effort and "no_reasoning_effort" not in quirks:
+            kwargs["reasoning_effort"] = effort
+        if json_mode and "no_response_format" not in quirks:
+            kwargs["response_format"] = {"type": "json_object"}
+        return kwargs
+
     # -- accounting -------------------------------------------------------
 
     def _record(self, response: Any) -> None:
@@ -204,6 +240,36 @@ class LLMClient:
         while node is not None:
             node.usage.add(prompt, completion, cost)
             node = node._parent
+
+
+#: Request-shape adaptations discovered at runtime, keyed by model name.
+#: Learned once per process, so only the first call to a new model pays the
+#: round trip.
+_QUIRKS: Dict[str, set] = {}
+
+
+def _learn_quirk(model: str, exc: Exception) -> bool:
+    """Record a parameter rejection. True if this is worth retrying.
+
+    Only a rejection we know how to answer counts. An unrecognised 400 falls
+    through to the ordinary retry path so a real failure is not retried
+    forever.
+    """
+    message = str(exc).lower()
+    if "unsupported" not in message and "not supported" not in message:
+        return False
+    quirks = _QUIRKS.setdefault(model, set())
+    learned = False
+    for needle, quirk in (
+        ("max_tokens", "max_completion_tokens"),
+        ("temperature", "no_temperature"),
+        ("reasoning_effort", "no_reasoning_effort"),
+        ("response_format", "no_response_format"),
+    ):
+        if needle in message and quirk not in quirks:
+            quirks.add(quirk)
+            learned = True
+    return learned
 
 
 class StubLLMClient(LLMClient):

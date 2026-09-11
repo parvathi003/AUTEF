@@ -101,7 +101,8 @@ class Session:
         self.lock = threading.Lock()
         self.logs: List[str] = []
         self.settings: Dict[str, Any] = {
-            "model": "gpt-4o-mini",
+            "model": "gpt-5",
+            "reasoning_effort": "medium",
             "max_attempts": 3,
             "use_venv": False,
             "use_cache": True,
@@ -184,6 +185,7 @@ def _config(session: Session):
     return AutefConfig.from_env(
         workspace=session.workspace,
         model=s["model"],
+        reasoning_effort=s["reasoning_effort"] or None,
         max_attempts=int(s["max_attempts"]),
         use_venv=bool(s["use_venv"]),
         use_signature_cache=bool(s["use_cache"]),
