@@ -180,7 +180,8 @@ def testable_modules(
             logger.debug("Skipping %s: %s", candidate.path, module.skipped_reason)
 
     modules.sort(key=lambda m: len(m.units), reverse=True)
-    return modules[:limit] if limit else modules
+    # None means no limit; 0 means none. `if limit` conflated them.
+    return modules if limit is None else modules[:limit]
 
 
 def modules_without_tests(
@@ -201,7 +202,7 @@ def modules_without_tests(
         return f"test_{stem}.py" in existing or f"{stem}_test.py" in existing
 
     uncovered = [m for m in modules if not covered(m)]
-    return uncovered[:limit] if limit else uncovered
+    return uncovered if limit is None else uncovered[:limit]
 
 
 # ---------------------------------------------------------------------------

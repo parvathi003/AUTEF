@@ -292,4 +292,8 @@ def gaps(snapshot: CoverageSnapshot, *, limit: Optional[int] = None) -> List[Fil
     incomplete.sort(
         key=lambda f: (len(f.missing_lines) + len(f.missing_branches)), reverse=True
     )
-    return incomplete[:limit] if limit else incomplete
+    # `if limit` would read 0 as "no limit" and generate for every file --
+    # the opposite of what a caller asking for zero meant, and on an account
+    # with no credit the difference is a stack of failed calls rather than a
+    # no-op.
+    return incomplete if limit is None else incomplete[:limit]
