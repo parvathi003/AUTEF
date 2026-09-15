@@ -424,6 +424,10 @@ input[type=range]::-moz-range-thumb { width: 18px; height: 18px; border: none; b
 .stage:disabled { opacity: .45; cursor: not-allowed; }
 .stage.done { border-color: var(--tertiary); background: color-mix(in srgb, var(--tertiary-container) 45%, transparent); }
 .stage.active { border-color: var(--primary); border-width: 2px; padding: 12px 12px 12px 11px; }
+/* Asked for and did not happen. Distinct from never asked for, which is the
+   plain state, and from failed, which is the page-level error banner. */
+.stage.skipped { border-color: var(--error); background: color-mix(in srgb, var(--error-container) 30%, transparent); }
+.stage.skipped .stage-note { color: var(--error); }
 
 .stage-num {
   flex: 0 0 auto;

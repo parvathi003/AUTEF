@@ -481,18 +481,70 @@ def render_html(data: Dict[str, Any]) -> str:
             add('<div class="ms">')
             add(_metric("Mutation score", f"{mut.get('score_after')}%",
                         f"was {mut.get('score_before')}%"))
-            add(_metric("Killed", f"{mut.get('killed_after')} / {mut.get('total')}"))
+            add(_metric("Killed",
+                        f"{mut.get('killed_after')} / {mut.get('scored') or mut.get('total')}",
+                        "of the mutants a verdict was reached on"))
             add(_metric("Newly killed", mut.get("newly_killed", 0)))
             add(_metric("Killer tests kept", mut.get("written", 0)))
             add("</div>")
             add('<p class="note">A killer test counts only if it passes on the '
                 "original source and fails with the mutant applied. Passing both "
                 "ways raises the score without testing anything.</p>")
+            if mut.get("unscored"):
+                add('<div class="warn">' + _e(str(mut.get("unscored")))
+                    + " mutant(s) reached no verdict"
+                    + (" because the phase ran out of its time budget"
+                       if mut.get("budget_exhausted") else "")
+                    + ". They are left out of the score rather than counted as "
+                    "survivors: not catching a mutant and never finding out are "
+                    "different facts.</div>")
+            if mut.get("excluded"):
+                add('<p class="note">Scored against the tests that pass on '
+                    "unmutated source. " + _e(str(len(mut["excluded"])))
+                    + " already-failing test(s) were excluded, because a test "
+                    "that was broken before the mutant cannot show that the "
+                    "suite caught it: <code>"
+                    + _e(", ".join(mut["excluded"][:6]))
+                    + ("..." if len(mut["excluded"]) > 6 else "")
+                    + "</code></p>")
             add(_mutant_table(mut.get("mutants") or []))
             add(_written_section("The killer tests", mut.get("files") or [], ""))
         else:
             add('<div class="warn">' + _e(mut.get("skipped_reason")
                 or "Not measured.") + "</div>")
+
+    # -- what was removed, and what did not run ---------------------------
+    quarantined = data.get("quarantined") or []
+    if quarantined:
+        add("<h2>Tests AUTEF removed</h2>")
+        add('<p class="note">These were written by AUTEF and could not be '
+            "repaired, so they were taken back out: a suite handed back redder "
+            "than the one uploaded is not an improvement. Each one is kept in "
+            "full beside the test file it came from, in a "
+            "<code>quarantined_*.py</code> that pytest does not collect. "
+            "Nothing the project itself wrote is ever removed.</p>")
+        add("<table><tr><th>Test</th><th>Diagnosed as</th><th>Why it went</th></tr>")
+        for item in quarantined:
+            add("<tr><td><code>" + _e(item.get("nodeid", "")) + "</code></td>"
+                + "<td>" + _e(item.get("root_cause") or "-") + "</td>"
+                + "<td>" + _e(item.get("reason", "")) + "</td></tr>")
+        add("</table>")
+        if any(q.get("root_cause") == "production_bug" for q in quarantined):
+            add('<p class="note"><strong>Worth reading rather than '
+                "dismissing:</strong> a removal diagnosed as "
+                "<code>production_bug</code> is AUTEF saying the test was right "
+                "and the code is wrong. Repairing such a test would have hidden "
+                "a real defect, so it was refused.</p>")
+
+    skips = data.get("stage_skips") or {}
+    if skips:
+        add("<h2>What did not run</h2>")
+        add('<p class="note">A stage that declines to run is not a stage that '
+            "ran and found nothing. Both used to look the same here.</p>")
+        add("<table><tr><th>Stage</th><th>Reason</th></tr>")
+        for key, reason in skips.items():
+            add(f"<tr><th>{_e(key)}</th><td>{_e(reason)}</td></tr>")
+        add("</table>")
 
     # -- spend ------------------------------------------------------------
     add("<h2>Model usage</h2><table>")
@@ -502,6 +554,13 @@ def render_html(data: Dict[str, Any]) -> str:
         ("Completion tokens", usage.get("completion_tokens", 0)),
         ("Cost (USD)", "%.6f" % usage.get("cost_usd", 0)),
         ("Wall clock", str(data.get("elapsed_s", 0)) + "s"),
+        # Named so a figure quoted from this report can be attributed to a
+        # configuration. A reasoning model refuses temperature 0, so runs are
+        # not bit-identical and the settings are the only thing that pins them.
+        ("Model", (data.get("settings") or {}).get("model", "")),
+        ("Thinking effort",
+         (data.get("settings") or {}).get("reasoning_effort") or "off"),
+        ("Escalation rungs", (data.get("settings") or {}).get("max_attempts", "")),
     ]:
         add(f"<tr><th>{_e(label)}</th><td>{_e(value)}</td></tr>")
     add("</table>")

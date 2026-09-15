@@ -231,17 +231,25 @@
       var done = !!state.done[String(n)];
       var active = state.running === n;
       var queued = state.queued.indexOf(n) >= 0;
+      // A stage that was asked for and did not happen has to look different
+      // from one that was never asked for. It used to look identical.
+      var skipped = (state.skipped || {})[String(n)];
 
       var button = document.createElement("button");
-      button.className = "stage" + (done ? " done" : "") + (active ? " active" : "");
+      button.className = "stage" + (done ? " done" : "") + (active ? " active" : "")
+        + (skipped && !done ? " skipped" : "");
       button.disabled = busy || !!blocked;
-      button.title = blocked || (state.billed_stages.indexOf(n) >= 0
+      button.title = skipped || blocked || (state.billed_stages.indexOf(n) >= 0
         ? "Calls the model" : "No model call");
       button.dataset.stage = String(n);
 
-      var note = active ? "running..." : queued ? "queued" : STAGE_NOTES[n];
+      var note = active ? "running..."
+        : queued ? "queued"
+        : (skipped && !done) ? skipped
+        : STAGE_NOTES[n];
       button.innerHTML =
-        '<span class="stage-num">' + (done && !active ? "&#10003;" : n) + "</span>" +
+        '<span class="stage-num">' +
+          (done && !active ? "&#10003;" : (skipped && !done) ? "!" : n) + "</span>" +
         '<span class="stage-body">' +
           '<span class="stage-name">' + esc(state.stage_names[String(n)]) + "</span>" +
           '<span class="stage-note">' + esc(note) + "</span>" +

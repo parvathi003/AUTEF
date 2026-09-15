@@ -32,7 +32,13 @@ MODEL_PRICING: Dict[str, Dict[str, float]] = {
     "gpt-5.6-sol": {"input": 4.00 / 1_000_000, "output": 20.00 / 1_000_000},
 }
 
-DEFAULT_MODEL = "gpt-4o-mini"
+#: One source of truth for the default. The CLI, the web settings and the
+#: dropdown disagreed -- gpt-4o-mini, gpt-5 and gpt-5.6-sol respectively -- so
+#: a run's cost and quality depended on which front end started it.
+DEFAULT_MODEL = "gpt-5.6-sol"
+#: Default thinking effort for models that reason. Dropped automatically for
+#: models that do not.
+DEFAULT_REASONING_EFFORT = "medium"
 
 
 @dataclass
@@ -60,7 +66,7 @@ class AutefConfig:
     #: when set, and dropped automatically by the client for models that
     #: reject it, so a non-reasoning model can be selected without changing
     #: this. One of "minimal", "low", "medium", "high".
-    reasoning_effort: Optional[str] = None
+    reasoning_effort: Optional[str] = DEFAULT_REASONING_EFFORT
 
     # --- repair loop -----------------------------------------------------
     #: Rungs of the escalation ladder to try before giving up on a test.

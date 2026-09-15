@@ -36,6 +36,8 @@ from pathlib import Path, PurePath
 from typing import Any, Dict, List, Optional
 from urllib.parse import parse_qs
 
+from ..config import DEFAULT_MODEL, DEFAULT_REASONING_EFFORT, resolve_api_key
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_PORT = 8000
@@ -100,9 +102,12 @@ class Session:
         self.created = time.time()
         self.lock = threading.Lock()
         self.logs: List[str] = []
+        #: stage -> why it did not run. A stage that was asked for and did not
+        #: happen has to be distinguishable from one that was never asked for.
+        self.skipped: Dict[int, str] = {}
         self.settings: Dict[str, Any] = {
-            "model": "gpt-5",
-            "reasoning_effort": "medium",
+            "model": DEFAULT_MODEL,
+            "reasoning_effort": DEFAULT_REASONING_EFFORT,
             "max_attempts": 4,
             "use_venv": False,
             "use_cache": True,
@@ -370,6 +375,31 @@ def _stage_repair(session: Session, config) -> None:
             failure, baseline_passing, record=records.get(failure.nodeid)
         )
     st["records"] = records
+    _quarantine_unfixed(session)
+
+
+def _quarantine_unfixed(session: Session) -> None:
+    """Take out the tests AUTEF wrote and could not repair.
+
+    The CLI does this inside ``orchestrator.run``; the web UI drives the stages
+    one at a time and never goes through it, so without this the page would
+    keep the behaviour the pipeline has just been fixed to avoid: a suite
+    handed back redder than the one uploaded, and stage 8 gated off by our own
+    unreviewed output.
+    """
+    from ..quarantine import sweep
+
+    st = session.state
+    swept = sweep(list((st.get("records") or {}).values()))
+    if not swept.removed:
+        return
+    existing = list(st.get("quarantined") or [])
+    seen = {q["nodeid"] for q in existing}
+    for item in swept.removed:
+        if item.nodeid not in seen:
+            existing.append(item.to_dict())
+    st["quarantined"] = existing
+    logger.info("Quarantined %d unrepairable generated test(s)", swept.count)
 
 
 def _repair_pass(session: Session, config, *, merge: bool) -> None:
@@ -394,6 +424,7 @@ def _repair_pass(session: Session, config, *, merge: bool) -> None:
         )
     st["records"] = records
     st["failing_source"] = sources
+    _quarantine_unfixed(session)
 
 
 def _stage_coverage(session: Session, config) -> None:
@@ -473,7 +504,16 @@ def _blocked_reason(session: Session, stage: int) -> Optional[str]:
     if stage == 3:
         return None if "environment" in st else "Run stage 2 first."
     if stage in (4, 7, 8, 9):
-        return None if "before" in st else "Run stage 3 first."
+        if "before" not in st:
+            return "Run stage 3 first."
+        if stage in BILLED_STAGES and not resolve_api_key():
+            # Checked here rather than discovered inside the stage, so a queued
+            # run says so before spending minutes getting there.
+            return (
+                "This stage calls the model and no API key was found. Set "
+                "OPENAI_API_KEY, or put one in a .env file."
+            )
+        return None
     if stage == 5:
         return None if st.get("failures") else "Nothing is failing to diagnose."
     if stage == 6:
@@ -496,8 +536,10 @@ def _run_stage(session: Session, stage: int) -> None:
         session.done[stage] = True
     except StageError as exc:
         session.error = str(exc)
+        session.skipped[stage] = str(exc)
     except Exception as exc:  # pragma: no cover - surfaced to the user
         session.error = f"{type(exc).__name__}: {exc}"
+        session.skipped[stage] = session.error
         logger.error("stage %s failed\n%s", stage, traceback.format_exc())
     finally:
         root.removeHandler(handler)
@@ -506,25 +548,27 @@ def _run_stage(session: Session, stage: int) -> None:
 
 
 def _worker(session: Session) -> None:
-    """Runs the queue until it empties or a stage fails."""
+    """Runs the queue until it empties, stepping over what cannot run.
+
+    A stage that is blocked is recorded and skipped rather than silently
+    emptying the queue. The old behaviour dropped every remaining stage and
+    published an empty one, so the page rendered the dropped stages as though
+    they had never been asked for: a run that died at stage 4 looked exactly
+    like a run that was only ever going to do four stages. The report is the
+    stage that most needs to survive a failure, since it is where the reason
+    would be written down.
+    """
     while True:
         with session.lock:
-            if session.error or not session.queue:
-                session.queue = []
+            if not session.queue:
                 session.running = None
                 return
             stage = session.queue.pop(0)
             blocked = _blocked_reason(session, stage)
-            # In a chained run, diagnosis and repair are skipped when nothing
-            # is failing: a green project should still reach coverage,
-            # mutation and the report.
-            if blocked and stage in (5, 6):
-                continue
             if blocked:
-                session.error = blocked
-                session.queue = []
-                session.running = None
-                return
+                session.skipped[stage] = blocked
+                logger.info("stage %s skipped: %s", stage, blocked)
+                continue
             session.running = stage
         _run_stage(session, stage)
 
@@ -627,8 +671,7 @@ def _mutants(outcome) -> List[Dict[str, Any]]:
 
 
 def _snapshot(session: Session) -> Dict[str, Any]:
-    from ..config import resolve_api_key
-
+    
     st = session.state
     out: Dict[str, Any] = {
         "username": session.username,
@@ -646,6 +689,13 @@ def _snapshot(session: Session) -> Dict[str, Any]:
         "blocked": {str(n): _blocked_reason(session, n) for n in range(1, 10)},
         "logs": session.logs[-120:],
         "api_key_present": bool(resolve_api_key()),
+        "skipped": {str(k): v for k, v in session.skipped.items()},
+        # Both feed the report: a test that was removed, and a stage that
+        # declined to run, each have to be visible to whoever reads it.
+        "quarantined": list(st.get("quarantined") or []),
+        "stage_skips": {
+            STAGE_NAMES.get(k, str(k)): v for k, v in session.skipped.items()
+        },
     }
 
     layout = st.get("layout")
@@ -764,6 +814,12 @@ def _snapshot(session: Session) -> Dict[str, Any]:
             "killed_before": before.killed if before else 0,
             "killed_after": after.killed if after else 0,
             "total": before.total if before else 0,
+            # Scored is the denominator of the score; unscored mutants are ones
+            # no verdict was reached on, which is not the same as surviving.
+            "scored": before.scored if before else 0,
+            "unscored": before.unscored if before else 0,
+            "budget_exhausted": bool(mut.budget_exhausted),
+            "excluded": list(mut.excluded),
             "newly_killed": mut.newly_killed,
             "written": len(mut.accepted),
             "files": _written_files(mut.records),
