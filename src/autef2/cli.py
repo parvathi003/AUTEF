@@ -212,6 +212,7 @@ def _cmd_bench(args, config: AutefConfig) -> int:
         seed=args.seed,
         output_dir=Path(args.output) if args.output else None,
         use_cache=args.bench_cache,
+        enhance=args.enhance,
     )
     print(result.markdown())
     print(f"\nArtefacts written to {result.output_dir}")
@@ -346,6 +347,14 @@ def _build_parser() -> argparse.ArgumentParser:
     bench.add_argument("--per-stratum", type=int, help="Sample N projects per stratum")
     bench.add_argument("--seed", type=int, default=1337)
     bench.add_argument("--output", help="Directory for benchmark artefacts")
+    bench.add_argument(
+        "--enhance",
+        action="store_true",
+        help="Also measure coverage and mutation for the autef2 arm. Off by "
+        "default because mutation re-runs the suite once per mutant, which "
+        "multiplies the run time over a sample of projects. v1 has no such "
+        "stages, so these are reported for one arm and labelled as such.",
+    )
     bench.add_argument(
         "--bench-cache",
         action="store_true",

@@ -879,3 +879,47 @@ def test_the_test_subprocess_does_not_inherit_credentials():
 
     assert set(env) == {"PATH", "HOME", "LANG", "PYTHONPATH"}
     assert not any("sk-live" in v for v in env.values())
+
+
+def test_the_enhancement_table_reports_one_arm_and_says_why():
+    """v1 has no coverage or mutation stage, so a zeros column would lie.
+
+    A table showing "v1: 0%, v2: 90%" reads as a score of nil rather than as
+    the absence of the capability, which is a different and much stronger
+    claim than the evidence supports.
+    """
+    from autef2.eval.metrics import _enhancement_section
+    from autef2.models import CoverageSnapshot, Mutant, MutationSnapshot, RunReport
+
+    report = RunReport(project="cachetools")
+    report.coverage_before = CoverageSnapshot(
+        measured=True, statements=100, covered_statements=80,
+        branches=20, covered_branches=16)
+    report.coverage_after = CoverageSnapshot(
+        measured=True, statements=100, covered_statements=100,
+        branches=20, covered_branches=20)
+    report.mutation_before = MutationSnapshot(measured=True, mutants=[
+        Mutant(file="a.py", lineno=1, operator="==", original="a", mutated="b",
+               killed=True),
+        Mutant(file="a.py", lineno=2, operator="==", original="a", mutated="b",
+               killed=False),
+        Mutant(file="a.py", lineno=3, operator="==", original="a", mutated="b",
+               error="not scored: budget"),
+    ])
+    report.mutation_after = report.mutation_before
+
+    lines = _enhancement_section({"autef2": [report], "baseline": []})
+    text = "\n".join(lines)
+
+    assert "cachetools" in text
+    assert "80% -> 100%" in text, "coverage before/after is not shown"
+    assert "no mutation testing" in text, "the absence is not explained"
+    # Killed over scored, and the unscored mutant reported separately.
+    assert "1/2" in text and "| 1 |" in text
+
+
+def test_no_enhancement_table_when_nothing_was_measured():
+    from autef2.eval.metrics import _enhancement_section
+    from autef2.models import RunReport
+
+    assert _enhancement_section({"autef2": [RunReport(project="x")]}) == []

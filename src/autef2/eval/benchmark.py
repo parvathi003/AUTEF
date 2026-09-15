@@ -49,6 +49,10 @@ from .metrics import (
 logger = logging.getLogger(__name__)
 
 ARMS = ("baseline", "autef2")
+#: The arm under test. Coverage and mutation are measured for this one only:
+#: v1 has no such stages, so running them for the baseline would report zeros
+#: that read as a score rather than as an absence.
+CANDIDATE = "autef2"
 
 
 @dataclass
@@ -78,6 +82,12 @@ class ProjectSpec:
     #: this very benchmark. Recorded in the artefacts either way, so a run
     #: against a floating branch at least says what it actually measured.
     revision: Optional[str] = None
+    #: Caps for the enhancement stages, when the benchmark is asked to measure
+    #: them. Small by default: they are per-project costs and a benchmark runs
+    #: over several.
+    max_coverage_files: int = 2
+    max_mutants: int = 20
+    max_survivors: int = 3
 
     @property
     def pinned_source(self) -> str:
@@ -100,6 +110,9 @@ class ProjectSpec:
             generate=int(data.get("generate", 0)),
             fault_kinds=tuple(data.get("fault_kinds") or ()),
             revision=(str(data["revision"]) if data.get("revision") else None),
+            max_coverage_files=int(data.get("max_coverage_files", 2)),
+            max_mutants=int(data.get("max_mutants", 20)),
+            max_survivors=int(data.get("max_survivors", 3)),
         )
 
 
@@ -172,21 +185,30 @@ def run_benchmark(
     output_dir: Optional[Path] = None,
     use_cache: bool = False,
     llm: Optional[LLMClient] = None,
+    enhance: bool = False,
 ) -> BenchmarkResult:
+    """Run every project through every arm.
+
+    ``enhance`` additionally measures coverage and mutation for the candidate.
+    Off by default because it multiplies the run time -- mutation re-runs the
+    suite once per mutant -- and because the paired repair comparison, which is
+    what the significance test is about, does not need it.
+    """
     config = config or AutefConfig.from_env()
     output_dir = Path(output_dir or config.reports_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     result = BenchmarkResult(output_dir=str(output_dir))
     result.reports_by_arm = {arm: [] for arm in arms}
-    result.provenance = _provenance(config, specs, arms, seed, use_cache)
+    result.provenance = _provenance(config, specs, arms, seed, use_cache, enhance)
     started = time.time()
 
     for index, spec in enumerate(specs, start=1):
         logger.info("=== [%d/%d] %s (%s) ===", index, len(specs), spec.name, spec.stratum)
         try:
             self_reports, faults, shortfall = _run_one_project(
-                spec, config, arms, seed=seed, use_cache=use_cache, llm=llm
+                spec, config, arms, seed=seed, use_cache=use_cache, llm=llm,
+                enhance=enhance,
             )
         except IngestError as exc:
             logger.warning("Skipping %s: %s", spec.name, exc)
@@ -222,6 +244,7 @@ def _run_one_project(
     seed: int,
     use_cache: bool,
     llm: Optional[LLMClient],
+    enhance: bool = False,
 ) -> tuple[Dict[str, RunReport], List[FaultRecord], Optional[str]]:
     layout = ingest(spec.pinned_source, config, name_hint=spec.name)
 
@@ -296,6 +319,14 @@ def _run_one_project(
         else:
             raise ValueError(f"Unknown arm: {arm}")
 
+        # Coverage and mutation run for the candidate only, and only when
+        # asked for. v1 has no such stages -- it repairs a failing test
+        # function and stops -- so running them for the baseline would report
+        # zeros that read as a score rather than as an absence. What they
+        # measure is what v2 adds, and the table says so.
+        if arm == CANDIDATE and enhance and not report.error:
+            _measure_enhancements(report, layout, environment, config, arm_llm, spec)
+
         report.project = spec.name
         report.arm = arm
         report.prompt_tokens = arm_llm.usage.prompt_tokens
@@ -335,7 +366,48 @@ def _write_outputs(result: BenchmarkResult, output_dir: Path) -> None:
     logger.info("Wrote benchmark.md, benchmark.json, observations.csv to %s", output_dir)
 
 
-def _provenance(config, specs, arms, seed, use_cache) -> Dict[str, object]:
+def _measure_enhancements(report, layout, environment, config, llm, spec) -> None:
+    """Coverage and mutation for one project, onto an existing report.
+
+    Runs after repair so the suite is as green as the arm could make it: a
+    mutation score taken against a suite the arm has not finished repairing
+    measures the wrong thing, and the coverage figure would be the one the
+    project arrived with.
+    """
+    from ..enhance import CoveragePhase, MutationPhase
+
+    try:
+        coverage = CoveragePhase(layout, environment, config, llm).run(
+            max_files=spec.max_coverage_files
+        )
+        report.coverage_before = coverage.before
+        report.coverage_after = coverage.after
+        report.coverage_generated = coverage.records
+        if coverage.skipped_reason:
+            report.stage_skips["coverage"] = coverage.skipped_reason
+    except Exception as exc:  # noqa: BLE001 - one project must not end the run
+        logger.warning("%s: coverage failed: %s", spec.name, exc)
+        report.stage_skips["coverage"] = str(exc)
+
+    try:
+        mutation = MutationPhase(layout, environment, config, llm).run(
+            max_mutants=spec.max_mutants, max_survivors=spec.max_survivors,
+        )
+        report.mutation_before = mutation.before
+        report.mutation_after = mutation.after
+        report.mutation_generated = mutation.records
+        if mutation.skipped_reason:
+            report.stage_skips["mutation"] = mutation.skipped_reason
+        if mutation.excluded:
+            report.stage_skips["mutation_excluded"] = (
+                f"{len(mutation.excluded)} already-failing test(s) excluded"
+            )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("%s: mutation failed: %s", spec.name, exc)
+        report.stage_skips["mutation"] = str(exc)
+
+
+def _provenance(config, specs, arms, seed, use_cache, enhance=False) -> Dict[str, object]:
     """What produced these numbers.
 
     Two runs' artefacts were previously indistinguishable: nothing recorded the
@@ -353,6 +425,7 @@ def _provenance(config, specs, arms, seed, use_cache) -> Dict[str, object]:
         "seed": seed,
         "arms": list(arms),
         "signature_cache": bool(use_cache),
+        "enhancements_measured": bool(enhance),
         "autef2_commit": _framework_commit(),
         "projects": [
             {

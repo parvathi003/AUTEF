@@ -285,6 +285,61 @@ def write_observations_csv(
     return path
 
 
+def _enhancement_section(
+    reports_by_arm: Dict[str, Sequence[RunReport]]
+) -> List[str]:
+    """Coverage and mutation, per project, for the arm that has those stages.
+
+    Deliberately not a two-column comparison. v1 repairs a failing test
+    function and stops -- it has no generation-for-coverage and no mutation
+    testing at all -- so a column of zeros beside v2's numbers would read as a
+    score of nil rather than as the absence of the capability. What this table
+    reports is what v2 adds, which is the honest form of that comparison.
+    """
+    rows = []
+    for arm, reports in reports_by_arm.items():
+        for report in reports:
+            cov_b, cov_a = report.coverage_before, report.coverage_after
+            mut_b, mut_a = report.mutation_before, report.mutation_after
+            if not (cov_b or mut_b):
+                continue
+            rows.append((
+                report.project or "?",
+                f"{cov_b.line_rate:.0%} -> {(cov_a or cov_b).line_rate:.0%}"
+                if cov_b and cov_b.measured else "-",
+                f"{cov_b.branch_rate:.0%} -> {(cov_a or cov_b).branch_rate:.0%}"
+                if cov_b and cov_b.measured else "-",
+                len(report.coverage_generated),
+                f"{mut_b.score:.0%} -> {(mut_a or mut_b).score:.0%}"
+                if mut_b and mut_b.measured else "-",
+                f"{(mut_a or mut_b).killed}/{(mut_a or mut_b).scored}"
+                if mut_b and mut_b.measured else "-",
+                (mut_b.unscored if mut_b else 0),
+                len(report.mutation_generated),
+            ))
+    if not rows:
+        return []
+
+    lines = [
+        "", "## What v2 adds beyond repair", "",
+        "_v1 has no generation-for-coverage stage and no mutation testing, so "
+        "there is no second column to put beside these. A column of zeros "
+        "would read as a score rather than as an absence._", "",
+        "| Project | Line cov | Branch cov | Cov tests | Mutation | Killed | "
+        "Unscored | Killer tests |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    for row in rows:
+        lines.append("| " + " | ".join(str(c) for c in row) + " |")
+    lines += [
+        "",
+        "_Mutation score is killed over **scored**: a mutant that errored or "
+        "ran out of the phase budget reached no verdict and is left out of "
+        "both, rather than being counted as a survivor._",
+    ]
+    return lines
+
+
 def render_markdown(
     metrics_by_arm: Dict[str, ArmMetrics],
     reports_by_arm: Optional[Dict[str, Sequence[RunReport]]] = None,
@@ -353,6 +408,9 @@ def render_markdown(
             lines.append(f"| {cause} | " + " | ".join(cells) + " |")
     else:
         lines.append("_No diagnosed causes recorded._")
+
+    if reports_by_arm:
+        lines += _enhancement_section(reports_by_arm)
 
     if reports_by_arm:
         lines += ["", "## Per project", ""]
