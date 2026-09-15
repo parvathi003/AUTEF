@@ -241,6 +241,16 @@ def _tar_stem(path: Path) -> str:
     return path.stem
 
 
+def _looks_like_sha(ref: str) -> bool:
+    """Is this a commit id rather than a branch name?
+
+    Seven hex characters is git's own abbreviation floor. A branch could in
+    principle be named "abcdef1", but pinning is the deliberate act and a
+    branch with a hex-only name is not.
+    """
+    return 7 <= len(ref) <= 40 and all(c in "0123456789abcdefABCDEF" for c in ref)
+
+
 def fetch_url(url: str, config: AutefConfig) -> Path:
     """Download a project from a URL and return the local archive path.
 
@@ -257,11 +267,16 @@ def fetch_url(url: str, config: AutefConfig) -> Path:
     if match:
         owner, repo = match.group("owner"), match.group("repo")
         ref = match.group("ref")
-        archive = (
-            f"https://codeload.github.com/{owner}/{repo}/zip/refs/heads/{ref}"
-            if ref
-            else f"https://codeload.github.com/{owner}/{repo}/zip/HEAD"
-        )
+        if not ref:
+            archive = f"https://codeload.github.com/{owner}/{repo}/zip/HEAD"
+        elif _looks_like_sha(ref):
+            # A commit is not under refs/heads, and asking for it there 404s.
+            # Pinning to a commit is the only way a benchmark number stays
+            # reproducible: a branch moves, and tabulate went from 322 tests to
+            # 306 between two runs of this benchmark.
+            archive = f"https://codeload.github.com/{owner}/{repo}/zip/{ref}"
+        else:
+            archive = f"https://codeload.github.com/{owner}/{repo}/zip/refs/heads/{ref}"
         label = f"{repo}-{ref}" if ref else repo
         return _download(archive, downloads / f"{_safe_name(label)}.zip")
 

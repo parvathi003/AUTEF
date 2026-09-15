@@ -32,6 +32,7 @@ statement about seeded fault shapes, not about prompts.
 from __future__ import annotations
 
 import logging
+import copy
 import math
 from dataclasses import dataclass, field
 from pathlib import Path, PurePath
@@ -219,9 +220,17 @@ def compare_project(
 def from_benchmark(
     result: BenchmarkResult, *, project: Optional[str] = None
 ) -> ComparisonResult:
-    """Pair up an already-run benchmark. Kept separate so the UI can reuse it."""
+    """Pair up an already-run benchmark. Kept separate so the UI can reuse it.
+
+    Every project in the benchmark is paired, not just the first. Taking
+    ``reports[0]`` silently reduced a three-project run to one, and the exact
+    McNemar test needs at least six discordant pairs all favouring v2 before
+    p < 0.05 is attainable at all -- a bar one small repository cannot clear,
+    so the significance test could never fire on a multi-project benchmark
+    however many projects it was given.
+    """
     reports = {
-        arm: reports[0]
+        arm: _merge_reports(reports)
         for arm, reports in result.reports_by_arm.items()
         if reports
     }
@@ -351,6 +360,37 @@ def _why(record: RepairRecord) -> str:
         if reason:
             return reason
     return ""
+
+
+def _merge_reports(reports: List[RunReport]) -> RunReport:
+    """One arm's runs across every project, as a single report.
+
+    Repair records are pooled because a paired test cares about observations,
+    not about which repository each came from. Node ids are prefixed with the
+    project so two projects' ``test_add`` stay distinct, and the token and cost
+    tallies are summed so a per-arm cost still means something.
+    """
+    if len(reports) == 1:
+        return reports[0]
+
+    merged = copy.copy(reports[0])
+    merged.project = "+".join(
+        sorted({r.project for r in reports if r.project})
+    ) or "benchmark"
+    merged.records = []
+    for report in reports:
+        for record in report.records:
+            pooled = copy.copy(record)
+            if report.project and not pooled.nodeid.startswith(report.project):
+                pooled.nodeid = f"{report.project}::{pooled.nodeid}"
+            merged.records.append(pooled)
+    merged.prompt_tokens = sum(r.prompt_tokens for r in reports)
+    merged.completion_tokens = sum(r.completion_tokens for r in reports)
+    merged.llm_calls = sum(r.llm_calls for r in reports)
+    merged.cost_usd = sum(r.cost_usd for r in reports)
+    merged.duration_s = sum(r.duration_s for r in reports)
+    merged.error = next((r.error for r in reports if r.error), None)
+    return merged
 
 
 def _count(tests: Sequence[TestComparison]) -> PairedCounts:

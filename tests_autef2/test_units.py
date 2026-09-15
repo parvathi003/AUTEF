@@ -796,3 +796,64 @@ def test_generation_shows_the_model_how_the_project_writes_tests(tmp_path):
     assert "parametrize" in prompt, "its conventions were not visible"
     assert "sample_widget" in prompt, "existing fixtures were not offered"
     assert "do not repeat or import it" in prompt
+
+
+def test_a_multi_project_comparison_pools_every_project():
+    """Taking reports[0] silently reduced a four-project run to one.
+
+    The exact McNemar test needs at least six discordant pairs all favouring v2
+    before p < 0.05 is attainable, which one small repository cannot supply --
+    so the significance test could never fire however many projects the
+    benchmark was given.
+    """
+    from autef2.eval.compare import _merge_reports
+    from autef2.models import RepairRecord, RunReport
+
+    def report(project, fixed_count, total):
+        r = RunReport(project=project)
+        r.records = [
+            RepairRecord(nodeid=f"tests/test_a.py::test_{i}", signature=str(i),
+                         fixed=i < fixed_count)
+            for i in range(total)
+        ]
+        r.llm_calls, r.cost_usd = total, 0.5
+        return r
+
+    merged = _merge_reports([
+        report("schema", 2, 3), report("cachetools", 3, 4), report("sqlparse", 1, 5),
+    ])
+
+    assert len(merged.records) == 12, "only one project's records were kept"
+    assert sum(1 for r in merged.records if r.fixed) == 6
+    assert merged.llm_calls == 12 and merged.cost_usd == 1.5
+    # Two projects' test_0 must stay distinct observations.
+    ids = [r.nodeid for r in merged.records]
+    assert len(set(ids)) == len(ids), "node ids collided across projects"
+    assert all("::" in i for i in ids)
+
+
+def test_a_commit_is_fetched_as_a_commit_not_as_a_branch():
+    """A pinned revision 404s if it is looked for under refs/heads."""
+    from autef2.ingest import _looks_like_sha
+
+    assert _looks_like_sha("961dcff3f42e73b245aef65e377fe82763b257bb")
+    assert _looks_like_sha("961dcff")
+    assert not _looks_like_sha("main")
+    assert not _looks_like_sha("master")
+    assert not _looks_like_sha("release/2.0")
+    assert not _looks_like_sha("abc"), "too short to be an abbreviation"
+
+
+def test_the_benchmark_manifest_pins_every_project():
+    """A manifest on a moving branch cannot reproduce a quoted number."""
+    from autef2.eval.benchmark import load_specs
+
+    specs = load_specs(Path(__file__).resolve().parents[1] / "benchmarks" / "manifest.json")
+
+    assert len(specs) >= 3, "the portability claim needs more than two projects"
+    unpinned = [s.name for s in specs if not s.revision]
+    assert not unpinned, f"unpinned projects: {unpinned}"
+    for spec in specs:
+        assert spec.revision in spec.pinned_source
+    # The sample has to actually vary, or it is one project measured four times.
+    assert len({s.stratum for s in specs}) == len(specs)

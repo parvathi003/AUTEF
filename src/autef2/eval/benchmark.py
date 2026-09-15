@@ -72,6 +72,22 @@ class ProjectSpec:
     #: identical suite -- otherwise each arm would repair tests the other never
     #: saw and the comparison would not be paired.
     generate: int = 0
+    #: The exact commit to measure. Without one the manifest names a moving
+    #: branch, so a number quoted from a run in March cannot be reproduced in
+    #: September -- tabulate went from 322 tests to 306 between two runs of
+    #: this very benchmark. Recorded in the artefacts either way, so a run
+    #: against a floating branch at least says what it actually measured.
+    revision: Optional[str] = None
+
+    @property
+    def pinned_source(self) -> str:
+        """``source`` with the pinned revision applied, when there is one."""
+        if not self.revision:
+            return self.source
+        source = self.source.rstrip("/")
+        if "github.com/" in source and "/tree/" not in source:
+            return f"{source}/tree/{self.revision}"
+        return source
 
     @classmethod
     def from_dict(cls, data: dict) -> "ProjectSpec":
@@ -83,6 +99,7 @@ class ProjectSpec:
             max_tests=data.get("max_tests"),
             generate=int(data.get("generate", 0)),
             fault_kinds=tuple(data.get("fault_kinds") or ()),
+            revision=(str(data["revision"]) if data.get("revision") else None),
         )
 
 
@@ -96,6 +113,11 @@ class BenchmarkResult:
     skipped: List[Dict[str, str]] = field(default_factory=list)
     output_dir: Optional[str] = None
     duration_s: float = 0.0
+    #: What produced these numbers: model, effort, seed, framework commit and
+    #: the exact source each project was measured at. Without it two runs'
+    #: artefacts are indistinguishable, and no figure quoted from them can be
+    #: attributed to a configuration or reproduced.
+    provenance: Dict[str, object] = field(default_factory=dict)
 
     def markdown(self) -> str:
         return render_markdown(self.metrics_by_arm, self.reports_by_arm)
@@ -157,6 +179,7 @@ def run_benchmark(
 
     result = BenchmarkResult(output_dir=str(output_dir))
     result.reports_by_arm = {arm: [] for arm in arms}
+    result.provenance = _provenance(config, specs, arms, seed, use_cache)
     started = time.time()
 
     for index, spec in enumerate(specs, start=1):
@@ -200,7 +223,7 @@ def _run_one_project(
     use_cache: bool,
     llm: Optional[LLMClient],
 ) -> tuple[Dict[str, RunReport], List[FaultRecord], Optional[str]]:
-    layout = ingest(spec.source, config, name_hint=spec.name)
+    layout = ingest(spec.pinned_source, config, name_hint=spec.name)
 
     # One environment, built once and shared by both arms, so a difference
     # between them is never an artefact of dependency resolution.
@@ -291,6 +314,7 @@ def _write_outputs(result: BenchmarkResult, output_dir: Path) -> None:
     (output_dir / "benchmark.md").write_text(result.markdown(), encoding="utf-8")
 
     payload = {
+        "provenance": result.provenance,
         "metrics": flatten_for_json(result.metrics_by_arm),
         "skipped": result.skipped,
         "duration_s": round(result.duration_s, 2),
@@ -309,6 +333,57 @@ def _write_outputs(result: BenchmarkResult, output_dir: Path) -> None:
 
     write_observations_csv(output_dir / "observations.csv", result.reports_by_arm)
     logger.info("Wrote benchmark.md, benchmark.json, observations.csv to %s", output_dir)
+
+
+def _provenance(config, specs, arms, seed, use_cache) -> Dict[str, object]:
+    """What produced these numbers.
+
+    Two runs' artefacts were previously indistinguishable: nothing recorded the
+    model, the seed, or which commit of each project was measured, so no figure
+    quoted from them could be attributed to a configuration or reproduced. The
+    model matters more than it used to -- a reasoning model refuses
+    temperature 0, so runs are not bit-identical and the configuration is the
+    only thing that can be pinned.
+    """
+    return {
+        "model": config.model,
+        "reasoning_effort": config.reasoning_effort,
+        "temperature_requested": config.temperature,
+        "max_attempts": config.max_attempts,
+        "seed": seed,
+        "arms": list(arms),
+        "signature_cache": bool(use_cache),
+        "autef2_commit": _framework_commit(),
+        "projects": [
+            {
+                "name": spec.name,
+                "source": spec.source,
+                "revision": spec.revision,
+                "measured_source": spec.pinned_source,
+                "pinned": bool(spec.revision),
+                "stratum": spec.stratum,
+                "inject": spec.inject,
+                "fault_kinds": list(spec.fault_kinds),
+            }
+            for spec in specs
+        ],
+        "unpinned_projects": [s.name for s in specs if not s.revision],
+    }
+
+
+def _framework_commit() -> Optional[str]:
+    """The commit of AUTEF itself, when it is running from a checkout."""
+    import subprocess
+
+    try:
+        completed = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=str(Path(__file__).resolve().parents[3]),
+            capture_output=True, text=True, timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):  # pragma: no cover
+        return None
+    return completed.stdout.strip() or None if completed.returncode == 0 else None
 
 
 def _safe(name: str) -> str:
