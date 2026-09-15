@@ -530,11 +530,29 @@ def _detect_import_roots(
     root. Test directories without ``__init__.py`` are rootdir-relative under
     pytest, so we add their parent too rather than relying on any one
     convention holding.
+
+    A directory that is itself a package is never added. Putting ``pyparsing/``
+    on the path does not help ``import pyparsing`` -- the project root already
+    does that -- but it does make every module inside it importable as a
+    top-level name, so ``pyparsing/warnings.py`` shadows the standard library's
+    ``warnings`` and the whole suite dies during collection. The same killed
+    jmespath, whose ``ast.py`` shadows ``ast``. Measured on both: 0 tests
+    collected before this, the full suite after.
     """
     roots: List[Path] = [root]
     for source_root in source_roots:
-        if source_root != root:
-            roots.append(source_root)
+        if source_root == root:
+            continue
+        if (source_root / "__init__.py").is_file():
+            parent = source_root.parent
+            if parent not in roots:
+                roots.append(parent)
+            notes.append(
+                f"{source_root.name} is a package, so its parent is on the "
+                "path rather than the package itself"
+            )
+            continue
+        roots.append(source_root)
     for test_root in test_roots:
         if not (test_root / "__init__.py").is_file() and test_root != root:
             roots.append(test_root)

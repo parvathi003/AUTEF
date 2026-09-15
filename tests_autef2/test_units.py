@@ -716,3 +716,83 @@ def test_an_unsure_non_repairable_verdict_does_not_skip_the_test():
     assert may_skip(diagnosis(0.6), 0.6), "the floor is inclusive"
     assert not may_skip(diagnosis(0.3), 0.6)
     assert not may_skip(diagnosis(0.0), 0.6)
+
+
+def test_a_package_directory_never_goes_on_the_import_path(tmp_path):
+    """Putting ``pyparsing/`` on sys.path makes its modules shadow the stdlib.
+
+    ``import pyparsing`` already works from the project root. Adding the
+    package directory itself only makes every module inside it importable as a
+    top-level name, so ``pyparsing/warnings.py`` shadows ``warnings`` and the
+    whole suite dies during collection. Measured on the real repository: 0
+    tests collected before this rule, 4155 after.
+    """
+    from autef2.ingest import _detect_import_roots
+
+    root = tmp_path / "proj"
+    package = root / "thing"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (package / "warnings.py").write_text("", encoding="utf-8")
+    tests = root / "tests"
+    tests.mkdir()
+
+    roots = _detect_import_roots(root, [package], [tests], [])
+
+    assert package not in roots, "the package itself shadows the stdlib"
+    assert root in roots, "the parent must be there for `import thing` to work"
+
+
+def test_a_src_directory_still_goes_on_the_import_path(tmp_path):
+    """The rule is about packages, not about every source root."""
+    from autef2.ingest import _detect_import_roots
+
+    root = tmp_path / "proj"
+    src = root / "src"
+    src.mkdir(parents=True)
+    (src / "thing.py").write_text("", encoding="utf-8")
+    tests = root / "tests"
+    tests.mkdir()
+
+    roots = _detect_import_roots(root, [src], [tests], [])
+
+    assert src in roots, "a src/ root is not a package and must stay"
+
+
+def test_generation_shows_the_model_how_the_project_writes_tests(tmp_path):
+    """Nothing in stages 4-6 used to show the model one existing test.
+
+    Asked to write tests for an unfamiliar codebase with no sight of its
+    conventions, the model guesses them -- and tests written blind to the house
+    style are the ones that fail on arrival.
+    """
+    from autef2.agents.generation import build_generation_prompt
+    from autef2.chunker import split_module
+    from autef2.models import ProjectLayout
+
+    root = tmp_path / "proj"
+    tests = root / "tests"
+    tests.mkdir(parents=True)
+    module = root / "ops.py"
+    module.write_text("def total(a, b):\n    return a + b\n", encoding="utf-8")
+    (tests / "test_existing.py").write_text(
+        "import pytest\n\n\n"
+        "@pytest.mark.parametrize('a,b', [(1, 2)])\n"
+        "def test_house_style(a, b, sample_widget):\n    assert a < b\n",
+        encoding="utf-8",
+    )
+    (tests / "conftest.py").write_text(
+        "import pytest\n\n\n@pytest.fixture\ndef sample_widget():\n    return 1\n",
+        encoding="utf-8",
+    )
+    layout = ProjectLayout(
+        name="proj", root=str(root), import_roots=[str(root)],
+        test_roots=[str(tests)],
+    )
+
+    prompt = build_generation_prompt(split_module(module, layout), layout)
+
+    assert "test_house_style" in prompt, "the project's own tests were not shown"
+    assert "parametrize" in prompt, "its conventions were not visible"
+    assert "sample_widget" in prompt, "existing fixtures were not offered"
+    assert "do not repeat or import it" in prompt

@@ -85,6 +85,87 @@ SYSTEM_PROMPT = (
 )
 
 
+#: How much of a project's own test file to show as an example. Enough to make
+#: the conventions visible, short enough not to crowd out the module source.
+EXEMPLAR_CHARS = 3000
+FIXTURE_CHARS = 1500
+
+
+def _exemplar_test(layout: ProjectLayout) -> str:
+    """One of the project's own test files, as a worked example.
+
+    Nothing in stages 4 to 6 used to show the model a single test the project
+    had written. It was asked to write tests for an unfamiliar codebase with no
+    sight of how that codebase tests things -- which import style, which
+    fixtures, which assertion helpers, whether tests are functions or
+    TestCase methods. Tests written blind to the house style are exactly the
+    ones that fail on arrival and then occupy the repair loop.
+
+    The file this framework wrote itself is never offered as the example.
+    """
+    candidates: List[Path] = []
+    for test_root in layout.test_roots or []:
+        root = Path(test_root)
+        if not root.is_dir():
+            continue
+        candidates.extend(sorted(root.rglob("test_*.py")))
+        candidates.extend(sorted(root.rglob("*_test.py")))
+
+    for path in candidates:
+        if authored_here(path):
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:  # pragma: no cover
+            continue
+        if not text.strip():
+            continue
+        body = text[:EXEMPLAR_CHARS]
+        if len(text) > EXEMPLAR_CHARS:
+            body += "\n# ... truncated ...\n"
+        return (
+            f"\nHow this project writes tests (`{path.name}`, for style only "
+            "-- do not repeat or import it):\n"
+            f"```python\n{body}\n```\n"
+        )
+    return ""
+
+
+def _conftest_fixtures(layout: ProjectLayout) -> str:
+    """The project's conftest, so generated tests can use what is already there.
+
+    A test that reimplements a fixture the project already provides is a test
+    that diverges from the suite around it, and one that requests a fixture
+    that does not exist is a collection error.
+    """
+    seen: List[Path] = []
+    for test_root in layout.test_roots or []:
+        candidate = Path(test_root) / "conftest.py"
+        if candidate.is_file():
+            seen.append(candidate)
+    root_conftest = Path(layout.root) / "conftest.py"
+    if root_conftest.is_file():
+        seen.append(root_conftest)
+
+    for path in seen:
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:  # pragma: no cover
+            continue
+        if "fixture" not in text:
+            continue
+        body = text[:FIXTURE_CHARS]
+        if len(text) > FIXTURE_CHARS:
+            body += "\n# ... truncated ...\n"
+        return (
+            "\nFixtures already available from conftest.py (use these rather "
+            "than writing your own, and do not request any fixture that is not "
+            "here or built into pytest):\n"
+            f"```python\n{body}\n```\n"
+        )
+    return ""
+
+
 def build_generation_prompt(module: ModuleUnits, layout: ProjectLayout) -> str:
     """v1's instruction, with the import made real and the framework corrected.
 
@@ -98,6 +179,8 @@ def build_generation_prompt(module: ModuleUnits, layout: ProjectLayout) -> str:
         + (f" (methods: {', '.join(unit.members)})" if unit.members else "")
         for unit in module.units
     )
+    exemplar = _exemplar_test(layout)
+    fixtures = _conftest_fixtures(layout)
 
     return f"""Write a unit test suite for this Python module.
 
@@ -111,6 +194,7 @@ Source:
 ```python
 {module.source_text()}
 ```
+{exemplar}{fixtures}
 
 Requirements:
 - Import the code under test from `{module.import_name}`. That import works as
