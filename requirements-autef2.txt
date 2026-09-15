@@ -8,6 +8,9 @@
 openai>=1.30            # chat completions
 pytest>=7.0             # test execution (also installed into each project venv)
 python-dotenv>=1.0      # OPENAI_API_KEY from .env
+coverage>=7.0           # stage 7. Installed into each project's environment at
+                        # run time, and needed here too when no project venv is
+                        # used -- which is the shipped default.
 
 # The web front end is served by http.server from the standard library and
 # uses no CSS or JS framework, so it adds no dependency here. streamlit and

@@ -16,11 +16,14 @@ from __future__ import annotations
 import html
 import io
 import json
+import logging
 import re
 import time
 import zipfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 #: Never packed into the download: caches, virtualenvs and version control.
 SKIP_DIRS = {
@@ -348,7 +351,7 @@ def render_html(data: Dict[str, Any]) -> str:
 
     add(f"<h1>AUTEF v2 — {_e(data.get('project'))}</h1>")
     add(f'<p class="sub">Nine-stage run · generated {_e(data.get("generated_at"))}'
-        f' · signed in as {_e(data.get("username"))}</p>')
+        '</p>')
 
     # -- headline ---------------------------------------------------------
     add("<h2>Result</h2>")
@@ -380,7 +383,9 @@ def render_html(data: Dict[str, Any]) -> str:
         ("Installable", "yes" if layout.get("installable") else "no"),
         ("Isolated virtualenv", "yes" if env.get("isolated") else "no"),
         ("Packages installed", len(env.get("installed") or [])),
-        ("Working copy", layout.get("root")),
+        # Not the absolute path: it is a temp directory on the operator's
+        # machine, carries their account name, and means nothing to a reader.
+        ("Working copy", Path(str(layout.get("root") or "")).name),
     ]:
         add(f"<tr><th>{_e(label)}</th><td class='mono'>{_e(value)}</td></tr>")
     add("</table>")
@@ -591,6 +596,7 @@ def build_zip(session) -> Optional[bytes]:
         archive.writestr(
             "autef2-report.json", json.dumps(data, indent=2, default=str)
         )
+        omitted = []
         for path in sorted(root.rglob("*")):
             if any(part in SKIP_DIRS for part in path.parts):
                 continue
@@ -598,6 +604,18 @@ def build_zip(session) -> Optional[bytes]:
                 continue
             try:
                 archive.write(path, str(Path("project") / path.relative_to(root)))
-            except OSError:
-                continue
+            except OSError as exc:
+                # Silently dropping a file makes the archive a quiet lie: on
+                # Windows a path over 260 characters fails here, and a reader
+                # comparing the zip to the project would find files missing
+                # with nothing to say why.
+                omitted.append(f"{path.relative_to(root)}: {exc}")
+        if omitted:
+            archive.writestr(
+                "OMITTED.txt",
+                "These files could not be added to the archive:\n\n"
+                + "\n".join(omitted)
+                + "\n",
+            )
+            logger.warning("%d file(s) omitted from the archive", len(omitted))
     return buffer.getvalue()

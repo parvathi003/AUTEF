@@ -33,6 +33,38 @@ PLUGIN_NAME = "autef_report"
 EXIT_NO_TESTS = 5
 
 
+#: Environment variables never passed to a project's test subprocess. The
+#: suite being run is arbitrary code from an uploaded repository -- a conftest
+#: that reads os.environ is entirely ordinary -- and it used to inherit the
+#: operator's whole environment, OPENAI_API_KEY included. Nothing a unit test
+#: legitimately needs is in here.
+_SECRET_NAME_RE = re.compile(
+    r"(API[_-]?KEY|SECRET|TOKEN|PASSWORD|PASSWD|CREDENTIAL|PRIVATE[_-]?KEY"
+    r"|SESSION[_-]?KEY|AUTH)", re.I
+)
+#: Stripped by name as well, since these do not all match the pattern.
+_SECRET_NAMES = frozenset({
+    "OPENAI_API_KEY", "OPENAI_ORGANIZATION", "OPENAI_BASE_URL",
+    "ANTHROPIC_API_KEY", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY",
+    "AWS_SESSION_TOKEN", "GITHUB_TOKEN", "GH_TOKEN", "AUTEF_USER",
+    "AUTEF_PASSWORD",
+})
+
+
+def _without_secrets(source) -> Dict[str, str]:
+    """A copy of the environment with credentials removed."""
+    env: Dict[str, str] = {}
+    dropped = []
+    for name, value in source.items():
+        if name in _SECRET_NAMES or _SECRET_NAME_RE.search(name):
+            dropped.append(name)
+            continue
+        env[name] = value
+    if dropped:
+        logger.debug("Withheld from the test subprocess: %s", ", ".join(sorted(dropped)))
+    return env
+
+
 class TestRunner:
     """Executes pytest against one project and returns parsed results."""
 
@@ -240,7 +272,7 @@ class TestRunner:
         return result
 
     def _build_env(self, report_path: Optional[Path]) -> Dict[str, str]:
-        env = os.environ.copy()
+        env = _without_secrets(os.environ)
         if report_path is not None:
             env["AUTEF_REPORT_PATH"] = str(report_path)
         env["PYTHONDONTWRITEBYTECODE"] = "1"

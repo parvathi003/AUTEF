@@ -857,3 +857,25 @@ def test_the_benchmark_manifest_pins_every_project():
         assert spec.revision in spec.pinned_source
     # The sample has to actually vary, or it is one project measured four times.
     assert len({s.stratum for s in specs}) == len(specs)
+
+
+def test_the_test_subprocess_does_not_inherit_credentials():
+    """The suite being run is arbitrary code from an uploaded repository.
+
+    A conftest that reads os.environ is entirely ordinary, and it used to be
+    handed the operator's whole environment, OPENAI_API_KEY included.
+    """
+    from autef2.runner import _without_secrets
+
+    source = {
+        "PATH": "/usr/bin", "HOME": "/home/x", "LANG": "C.UTF-8",
+        "PYTHONPATH": "/src",
+        "OPENAI_API_KEY": "sk-live", "AWS_SECRET_ACCESS_KEY": "aws",
+        "MY_SERVICE_TOKEN": "t", "DB_PASSWORD": "p", "GITHUB_TOKEN": "gh",
+        "AUTEF_PASSWORD": "autef2025",
+    }
+
+    env = _without_secrets(source)
+
+    assert set(env) == {"PATH", "HOME", "LANG", "PYTHONPATH"}
+    assert not any("sk-live" in v for v in env.values())

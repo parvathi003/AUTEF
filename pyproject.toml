@@ -17,6 +17,10 @@ dependencies = [
     "openai>=1.30",
     "pytest>=7.0",
     "python-dotenv>=1.0",
+    # Stage 7 measures coverage. It is installed into a project's own venv at
+    # run time, but with use_venv off -- the shipped default -- the run uses
+    # this interpreter, so it has to be declared here too.
+    "coverage>=7.0",
     "tomli>=2.0; python_version < '3.11'",
 ]
 
