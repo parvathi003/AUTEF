@@ -285,6 +285,19 @@ def write_observations_csv(
     return path
 
 
+def _arms_with_no_model(
+    reports_by_arm: Optional[Dict[str, Sequence[RunReport]]]
+) -> List[str]:
+    """Arms that ran but never got an answer out of the model."""
+    if not reports_by_arm:
+        return []
+    return [
+        arm
+        for arm, reports in reports_by_arm.items()
+        if reports and not any(r.model_calls_succeeded for r in reports)
+    ]
+
+
 def _enhancement_section(
     reports_by_arm: Dict[str, Sequence[RunReport]]
 ) -> List[str]:
@@ -350,6 +363,20 @@ def render_markdown(
 
     if not arms:
         return "\n".join(lines + ["No results."])
+
+    # A run where every request failed produces a table of zeros that reads
+    # exactly like a measured result showing no difference. It is not a result
+    # at all, and the reader has to be told before they reach the numbers
+    # rather than left to infer it from the cost column reading 0.00.
+    dead = _arms_with_no_model(reports_by_arm)
+    if dead:
+        lines += [
+            "> **These numbers are not measurements.** No model call succeeded "
+            f"for {', '.join(dead)}, so nothing was attempted and every figure "
+            "below describes a run that did not happen. Check the API key and "
+            "the network, then run it again.",
+            "",
+        ]
 
     rows = [
         ("Projects processed", lambda m: f"{m.projects_executed}/{m.projects}"),

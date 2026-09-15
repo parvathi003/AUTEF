@@ -992,3 +992,24 @@ def test_an_unpriced_model_warns_once_and_costs_at_the_dearest_rate(caplog):
     assert "No pricing is configured" in caplog.text
     assert client.usage.cost_usd == 1000 * dearest["input"] + 1000 * dearest["output"]
     _PRICING_WARNED.discard("some-unreleased-model")
+
+
+def test_a_run_where_the_model_never_answered_is_not_reported_as_a_result():
+    """A table of zeros reads exactly like a measured result showing no effect.
+
+    It is not a result at all, and the reader must be told before they reach
+    the numbers rather than left to infer it from a cost of 0.00.
+    """
+    from autef2.eval.metrics import ArmMetrics, render_markdown
+    from autef2.models import RunReport
+
+    metrics = {"autef2": ArmMetrics(arm="autef2", projects=1, observations=4)}
+
+    dead = render_markdown(metrics, {"autef2": [RunReport(project="x")]})
+    assert "not measurements" in dead
+    assert "did not happen" in dead
+
+    answered = RunReport(project="x")
+    answered.llm_calls = 3
+    live = render_markdown(metrics, {"autef2": [answered]})
+    assert "not measurements" not in live, "a real run was labelled as dead"
