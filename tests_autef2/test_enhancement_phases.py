@@ -34,6 +34,7 @@ from autef2.ingest import ingest
 from autef2.llm import StubLLMClient
 from autef2.models import Mutant
 from autef2.mutation import MutationError, Mutator
+from autef2.runner import TestRunner
 from autef2.venv_manager import prepare_environment
 
 # ---------------------------------------------------------------------------
@@ -71,13 +72,15 @@ def make_config(tmp_path, **kwargs) -> AutefConfig:
     return AutefConfig(**defaults)
 
 
-def _project(tmp_path, *, with_tests: str = "") -> Path:
+def _project(
+    tmp_path, *, with_tests: str = "", test_name: str = "test_ops.py"
+) -> Path:
     root = tmp_path / "project"
     root.mkdir(parents=True, exist_ok=True)
     (root / "ops.py").write_text(CLASSIFY_SOURCE, encoding="utf-8")
     if with_tests:
         (root / "tests").mkdir(exist_ok=True)
-        (root / "tests" / "test_ops.py").write_text(with_tests, encoding="utf-8")
+        (root / "tests" / test_name).write_text(with_tests, encoding="utf-8")
     return root
 
 
@@ -701,3 +704,86 @@ def test_a_killer_test_that_works_is_marked_against_its_own_mutant(tmp_path):
     for row in newly:
         assert row["killed"], "marked as newly killed, so it must read as killed"
         assert row["attempt_error"] is None
+
+
+# ---------------------------------------------------------------------------
+# a generated file must leave the rest of the suite working
+# ---------------------------------------------------------------------------
+
+#: A generated test that passes on its own and wrecks everything after it.
+#: Reloading the module under test rebinds every class in it, so a test file
+#: that imported a name at module scope is left holding a stale class while the
+#: class body's own ``super(Cls, self)`` resolves to the new one. Not
+#: hypothetical: keleshev/schema went from 120 of its own tests passing to 44
+#: failing when one generated file did exactly this, and the repair loop then
+#: diagnosed the wreckage as production bugs in schema's source.
+RELOADING_TEST = '''
+import importlib
+
+import ops
+
+
+def test_reload_path():
+    importlib.reload(ops)
+    assert ops.classify(5) is not None
+'''
+
+#: The project's own test, holding a class reference taken at import time.
+HOLDS_A_CLASS_REFERENCE = '''
+from ops import Grade
+
+
+def test_grade_constructs():
+    assert Grade().label == "x"
+'''
+
+#: ``super(Grade, self)`` looks Grade up in the module at call time, so after a
+#: reload it is the new class while ``self`` is an instance of the old one.
+#: That is exactly how schema's Optional and Forbidden broke.
+CLASS_WITH_EXPLICIT_SUPER = '''
+
+class Base:
+    def __init__(self):
+        self.label = "x"
+
+
+class Grade(Base):
+    def __init__(self):
+        super(Grade, self).__init__()
+'''
+
+
+def test_a_generated_file_that_breaks_the_suite_is_rejected(tmp_path):
+    """Passing in isolation proves nothing about what a file does to the rest.
+
+    Validation used to run the new file alone and keep it if its own tests ran.
+    A file that damages the project's tests is worse than no file at all, and
+    the project must never be handed back worse than it arrived.
+    """
+    # The project's own test is named so the generated file sorts -- and so
+    # runs -- first, which is how the real one did its damage.
+    config, layout, env = _ready(
+        tmp_path, with_tests=HOLDS_A_CLASS_REFERENCE, test_name="test_zzz.py"
+    )
+    source = Path(layout.root) / "ops.py"
+    source.write_text(
+        source.read_text(encoding="utf-8") + CLASS_WITH_EXPLICIT_SUPER,
+        encoding="utf-8",
+    )
+
+    before = TestRunner(layout, env, config).run_suite()
+    assert before.passed and not before.failures, "the fixture must start green"
+
+    phase = GenerationPhase(layout, env, config, scripted(config, RELOADING_TEST))
+    outcome = phase.run(max_modules=1)
+
+    assert outcome.records, "nothing was attempted"
+    record = outcome.records[0]
+    assert not record.accepted, "a suite-breaking file was kept"
+    assert "passed before" in (record.error or ""), record.error
+    assert not Path(record.test_file).exists(), "the file was left in the project"
+
+    after = TestRunner(layout, env, config).run_suite()
+    assert not after.failures, "the project was left damaged"
+
+

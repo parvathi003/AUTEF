@@ -111,6 +111,16 @@ class GenerationPhase:
         self.llm = llm
         self.agent = TestGenerationAgent(llm, config, layout)
         self.runner = TestRunner(layout, environment, config)
+        #: Node ids that passed before this phase wrote anything. A generated
+        #: file that breaks any of them is rejected.
+        self._baseline_passing: List[str] = []
+
+    def _record_baseline(self) -> None:
+        """What was green before we touched the project."""
+        if self._baseline_passing:
+            return
+        result = self.runner.run_suite()
+        self._baseline_passing = list(result.passed) if result.ran else []
 
     def plan(self, *, max_modules: Optional[int] = None) -> List[ModuleUnits]:
         """Modules to generate for, most testable surface first.
@@ -137,6 +147,7 @@ class GenerationPhase:
             return outcome
 
         logger.info("Generating tests for %d module(s)", len(modules))
+        self._record_baseline()
         for index, module in enumerate(modules, start=1):
             logger.info(
                 "[%d/%d] %s (%d unit(s))",
@@ -166,10 +177,10 @@ class GenerationPhase:
     def _validate(self, record: GeneratedTest) -> None:
         """Run the file just written and record what it actually does.
 
-        A file is kept even when its tests fail: that is the repair loop's input.
-        It is only discarded when pytest could not run it at all, since such a
-        file is not a test suite by any reading and would sit in the project
-        breaking every later run.
+        A file is kept when its own tests fail: that is the repair loop's
+        input. It is discarded when pytest could not run it at all, and when
+        it breaks tests that were passing before it existed -- failing its own
+        assertions is useful, damaging the project is not.
         """
         result = self.runner.run_file(record.test_file)
 
@@ -188,6 +199,15 @@ class GenerationPhase:
 
         if record.tests_collected == 0 and not result.collection_errors:
             record.error = "pytest collected no tests from the generated file"
+            self.agent.revert(record)
+            return
+
+        damage = _breaks_the_suite(
+            self.runner, record, self._baseline_passing, label="generated"
+        )
+        if damage:
+            record.error = damage
+            logger.warning("  rejected: %s", damage)
             self.agent.revert(record)
             return
 
@@ -263,6 +283,16 @@ class CoveragePhase:
         self.llm = llm
         self.agent = CoverageImprovementAgent(llm, config, layout)
         self.runner = TestRunner(layout, environment, config)
+        #: Node ids that passed before this phase wrote anything. A generated
+        #: file that breaks any of them is rejected.
+        self._baseline_passing: List[str] = []
+
+    def _record_baseline(self) -> None:
+        """What was green before we touched the project."""
+        if self._baseline_passing:
+            return
+        result = self.runner.run_suite()
+        self._baseline_passing = list(result.passed) if result.ran else []
 
     def measure(self) -> CoverageSnapshot:
         return CoverageTool(self.layout, self.environment, self.config).measure()
@@ -278,6 +308,8 @@ class CoveragePhase:
             return outcome
 
         targets = gaps(outcome.before, limit=max_files)
+        if targets:
+            self._record_baseline()
         if not targets:
             logger.info("Nothing uncovered; no coverage tests needed")
             outcome.after = outcome.before
@@ -334,6 +366,15 @@ class CoveragePhase:
         record.tests_passing = len(result.passed)
         if record.tests_collected == 0 and not result.collection_errors:
             record.error = "no tests were collected from the generated file"
+            _remove_generated(record)
+            return
+
+        damage = _breaks_the_suite(
+            self.runner, record, self._baseline_passing, label="coverage"
+        )
+        if damage:
+            record.error = damage
+            logger.warning("  rejected: %s", damage)
             _remove_generated(record)
 
     def _existing_tests_for(self, source_path: str) -> str:
@@ -664,6 +705,43 @@ class MutationPhase:
 # ---------------------------------------------------------------------------
 # helpers
 # ---------------------------------------------------------------------------
+
+
+def _breaks_the_suite(
+    runner, record, baseline_passing, *, label: str
+) -> Optional[str]:
+    """Do previously-passing tests still pass with this file present?
+
+    Running the new file on its own -- which is all validation used to do --
+    proves it works in isolation and proves nothing about what it does to
+    everything else. A generated test that calls ``importlib.reload`` on the
+    module under test replaces every class object in it, so any test file that
+    did ``from pkg import Thing`` at import time is left holding a stale class
+    and fails on ``super()`` and ``isinstance``. Measured on keleshev/schema:
+    120 of the project's own tests passed alone, 44 of them failed once one
+    generated file ran first. The project was handed back worse than it
+    arrived, and the model then diagnosed the wreckage as production bugs in
+    the source.
+
+    Anything with this effect is rejected: monkeypatching without an undo,
+    mutating a global registry, chdir, reload. The cost is one suite run per
+    generated file, which is worth paying to never do that again.
+    """
+    if not baseline_passing:
+        return None
+    after = runner.run_suite()
+    if not after.ran:
+        return f"the suite no longer runs with the {label} file present"
+    still_passing = set(after.passed)
+    broken = [n for n in baseline_passing if n not in still_passing]
+    if not broken:
+        return None
+    shown = ", ".join(broken[:3]) + ("..." if len(broken) > 3 else "")
+    return (
+        f"{len(broken)} test(s) that passed before this file was written now "
+        f"fail with it present ({shown}). A generated file that breaks the "
+        "project's own tests is worse than no file at all."
+    )
 
 
 def _remove_generated(record: GeneratedTest) -> None:
