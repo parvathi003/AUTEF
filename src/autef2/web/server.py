@@ -103,7 +103,7 @@ class Session:
         self.settings: Dict[str, Any] = {
             "model": "gpt-5",
             "reasoning_effort": "medium",
-            "max_attempts": 3,
+            "max_attempts": 4,
             "use_venv": False,
             "use_cache": True,
             "max_tests": 0,

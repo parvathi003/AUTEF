@@ -64,7 +64,12 @@ class AutefConfig:
 
     # --- repair loop -----------------------------------------------------
     #: Rungs of the escalation ladder to try before giving up on a test.
-    max_attempts: int = 3
+    #: Four, not three, because the longest ladder is three rungs: at three
+    #: the cross-ladder escalation -- the one that asks the model for a
+    #: strategy outside the diagnosed cause's ladder -- was unreachable for
+    #: every root cause that has a full ladder, so the code existed and never
+    #: ran.
+    max_attempts: int = 4
     #: Reuse a previously successful strategy for an identical failure
     #: signature, skipping the analysis and strategy LLM calls.
     use_signature_cache: bool = True
@@ -90,6 +95,16 @@ class AutefConfig:
     #: that passes. Turning this off scores against the whole suite, which
     #: cannot tell a caught mutant from an already-broken test.
     mutation_requires_green: bool = True
+
+    #: A diagnosis has to be this sure before it may skip a test permanently.
+    #: production_bug and environment_dependency end the repair attempt before
+    #: it starts, so a wrong guess at 0.3 confidence silently discards a test
+    #: the ladder would have fixed. Below the floor the ladder runs anyway.
+    non_repairable_min_confidence: float = 0.6
+    #: Seconds to wait on one model request before giving up on it. Without a
+    #: ceiling a hung connection hangs the stage for as long as the process
+    #: lives; a reasoning model legitimately takes minutes, so this is generous.
+    request_timeout_s: float = 300.0
     single_test_timeout_s: int = 120
     install_timeout_s: int = 900
     #: Interpreter used to create project venvs.

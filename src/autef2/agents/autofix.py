@@ -132,7 +132,12 @@ class AutoFixAgent:
 
         self._bill(record, scoped)
 
-        if NO_FIX_SENTINEL in reply:
+        # The prompt asks for the sentinel on a line of its own, and that is
+        # how it must be matched. A bare substring test also fired when the
+        # model merely mentioned it -- "this is not a NO_TEST_FIX_NEEDED case"
+        # abandoned the repair and recorded a production defect that nobody
+        # had claimed.
+        if _claims_source_defect(reply):
             outcome = self._reject(
                 record,
                 started,
@@ -320,3 +325,12 @@ def _preview(code: str, limit: int = 8000) -> str:
     """
     code = code.strip()
     return code if len(code) <= limit else code[:limit] + "\n...[truncated]"
+
+
+def _claims_source_defect(reply: str) -> bool:
+    """Is the sentinel present as its own statement, not just mentioned?"""
+    for line in reply.splitlines():
+        stripped = line.strip().strip("`").strip("#").strip()
+        if stripped == NO_FIX_SENTINEL:
+            return True
+    return False

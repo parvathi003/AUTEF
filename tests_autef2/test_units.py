@@ -614,3 +614,105 @@ def test_budget_grows_when_reasoning_eats_it():
 
     _QUIRKS.pop(model, None)
     _MIN_BUDGET.pop(model, None)
+
+
+def _failure(message="", longrepr="", exc_type="AssertionError", phase="call"):
+    return TestFailure(
+        nodeid="tests/test_x.py::test_y",
+        outcome=Outcome.FAILED,
+        exception_type=exc_type,
+        exception_message=message,
+        longrepr=longrepr,
+        phase=phase,
+    )
+
+
+def test_classification_reads_the_error_not_the_test_source():
+    """pytest's longrepr carries the test's own source alongside the error.
+
+    A passing ``assert_called_once()`` three lines above the real failure used
+    to classify the whole test as a mock problem at 0.9 confidence, on the
+    strength of a line that worked.
+    """
+    longrepr = (
+        "    def test_total():\n"
+        "        mock.assert_called_once()\n"
+        "        assert total(2, 3) == 6\n"
+        "E       assert 5 == 6\n"
+    )
+    cause, confidence = heuristic_classify(
+        _failure("assert 5 == 6", longrepr)
+    )
+
+    assert cause is RootCause.ASSERTION_MISMATCH, (
+        "a passing mock assertion in the source decided the diagnosis"
+    )
+
+    # The same signature in the error itself still classifies as a mock problem.
+    cause, _ = heuristic_classify(
+        _failure("Expected 'send' to have been called once.",
+                 "E       AssertionError: Expected 'send' to have been called once.")
+    )
+    assert cause is RootCause.MOCK_MISCONFIGURATION
+
+
+def test_service_names_are_matched_as_errors_not_as_words():
+    """ENVIRONMENT_DEPENDENCY is NON_REPAIRABLE, so a loose match skips a test
+    permanently without one repair attempt."""
+    # A test that merely mentions Docker is not an environment failure.
+    cause, _ = heuristic_classify(_failure(
+        "assert 1 == 2",
+        "    def test_docker_image_name_is_built():\n"
+        "        assert build_name() == 'redis:7'\n"
+        "E       assert 'redis:6' == 'redis:7'\n",
+    ))
+    assert cause is RootCause.ASSERTION_MISMATCH, (
+        "a test whose subject is Docker was called an environment dependency"
+    )
+
+    # A real one still is.
+    cause, _ = heuristic_classify(_failure(
+        "Error 111 connecting to localhost:6379. Connection refused.",
+        "E       redis.exceptions.ConnectionError: Error 111 connecting",
+        exc_type="ConnectionError",
+    ))
+    assert cause is RootCause.ENVIRONMENT_DEPENDENCY
+
+
+def test_source_defect_sentinel_must_stand_alone():
+    """Mentioning the sentinel is not claiming it."""
+    from autef2.agents.autofix import _claims_source_defect
+
+    assert _claims_source_defect("NO_TEST_FIX_NEEDED")
+    assert _claims_source_defect("some reasoning\n  NO_TEST_FIX_NEEDED  \nmore")
+    assert _claims_source_defect("# NO_TEST_FIX_NEEDED")
+    assert not _claims_source_defect(
+        "This is not a NO_TEST_FIX_NEEDED case; the test is simply wrong."
+    )
+    assert not _claims_source_defect(
+        "def test_x():\n    # unlike NO_TEST_FIX_NEEDED situations, fix this\n    pass"
+    )
+
+
+def test_an_unsure_non_repairable_verdict_does_not_skip_the_test():
+    """A permanent skip on a 0.3-confidence guess discards a repairable test.
+
+    The skip ends the attempt before the ladder runs, and quarantine then takes
+    the test out of the suite -- so an unsure guess is acted on as though it
+    were certain. The floor sends anything below it down the ladder instead.
+    """
+    from autef2.models import Diagnosis
+    from autef2.orchestrator import may_skip
+
+    def diagnosis(confidence):
+        return Diagnosis(
+            root_cause=RootCause.PRODUCTION_BUG,
+            at_fault="source",
+            confidence=confidence,
+            explanation="the source looks wrong",
+        )
+
+    assert may_skip(diagnosis(0.9), 0.6)
+    assert may_skip(diagnosis(0.6), 0.6), "the floor is inclusive"
+    assert not may_skip(diagnosis(0.3), 0.6)
+    assert not may_skip(diagnosis(0.0), 0.6)

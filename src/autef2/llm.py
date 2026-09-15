@@ -88,6 +88,10 @@ class LLMClient:
         kwargs: Dict[str, Any] = {"api_key": self.config.api_key}
         if self.config.base_url:
             kwargs["base_url"] = self.config.base_url
+        # Without this a hung connection hangs the stage forever: the SDK's
+        # own default is generous and nothing downstream imposes a ceiling.
+        if self.config.request_timeout_s:
+            kwargs["timeout"] = self.config.request_timeout_s
         return OpenAI(**kwargs)
 
     def scoped(self) -> "LLMClient":

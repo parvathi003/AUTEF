@@ -80,7 +80,15 @@ _MESSAGE_RULES: List[Tuple[re.Pattern, RootCause, float]] = [
     (re.compile(r"does not have the attribute|_patch_object|Cannot autospec", re.I), RootCause.MOCK_MISCONFIGURATION, 0.85),
     (re.compile(r"<(Magic)?Mock (id|name)=", re.I), RootCause.MOCK_MISCONFIGURATION, 0.7),
     (re.compile(r"(Connection refused|Failed to establish a new connection|Name or service not known|getaddrinfo failed|Temporary failure in name resolution)", re.I), RootCause.ENVIRONMENT_DEPENDENCY, 0.9),
-    (re.compile(r"(could not connect to server|OperationalError|Access denied for user|no such table|Redis|Kafka|docker)", re.I), RootCause.ENVIRONMENT_DEPENDENCY, 0.75),
+    # Service names are matched only as the module of a raised exception
+    # (``redis.exceptions.ConnectionError``) or next to a connection word. Bare
+    # "Redis", "Kafka" and "docker" used to match anywhere in the traceback, so
+    # a test whose name or docstring mentioned Docker was classified as an
+    # environment dependency -- which is NON_REPAIRABLE, so it was skipped
+    # permanently, without one repair attempt.
+    (re.compile(r"\b(redis|kafka|docker|pymongo|botocore|boto3)\.[\w.]*(error|exception)", re.I), RootCause.ENVIRONMENT_DEPENDENCY, 0.85),
+    (re.compile(r"\b(redis|kafka|docker|rabbitmq|memcached)\b[^\n]{0,60}\b(refused|unreachable|unavailable|not running|timed out|could not connect)\b", re.I), RootCause.ENVIRONMENT_DEPENDENCY, 0.8),
+    (re.compile(r"(could not connect to server|OperationalError|Access denied for user|no such table)", re.I), RootCause.ENVIRONMENT_DEPENDENCY, 0.75),
     (re.compile(r"(takes \d+ positional argument|missing \d+ required|unexpected keyword argument|got multiple values for)", re.I), RootCause.API_MISUSE, 0.85),
 ]
 
@@ -103,10 +111,31 @@ _TYPE_RULES = {
 }
 
 
+def error_text(failure: TestFailure) -> str:
+    """The error itself, without the test source that led up to it.
+
+    pytest's ``longrepr`` interleaves the failing test's own source with the
+    error, and every line of that source used to be searched. A test whose
+    *passing* setup called ``mock.assert_called_once()`` three lines above the
+    real failure was therefore classified MOCK_MISCONFIGURATION at 0.9
+    confidence, on the strength of code that worked. Only the ``E`` lines are
+    the error; the rest is context.
+
+    Falls back to the whole thing when there are no ``E`` lines, which is how
+    collection errors arrive.
+    """
+    marked = [
+        line for line in failure.longrepr.splitlines()
+        if line.lstrip().startswith("E ") or line.lstrip() == "E"
+    ]
+    body = "\n".join(marked) if marked else failure.longrepr
+    return f"{failure.exception_type}\n{failure.exception_message}\n{body}"
+
+
 def heuristic_classify(failure: TestFailure) -> Tuple[RootCause, float]:
     """Classify without calling the model. Cheap, deterministic, and the
     fallback whenever the model is unavailable or unsure."""
-    haystack = f"{failure.exception_message}\n{failure.longrepr}"
+    haystack = error_text(failure)
 
     if failure.phase == "collect":
         return RootCause.COLLECTION_ERROR, 0.9

@@ -284,7 +284,11 @@ def test_metrics_compare_the_two_arms(tmp_path):
     )
     poor = run(
         {
-            "test_multiply_returns_product": [USELESS_MULTIPLY] * 3,
+            # Enough useless replies to outlast any escalation budget: when the
+            # list runs dry the stub answers NO_TEST_FIX_NEEDED, which would
+            # score this as a judged skip rather than the failure to repair
+            # this arm is meant to represent.
+            "test_multiply_returns_product": [USELESS_MULTIPLY] * 12,
             "test_describe_uses_precision": [GOOD_DESCRIBE],
         },
         "b",

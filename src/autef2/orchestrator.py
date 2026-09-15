@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import logging
 import time
+from dataclasses import replace
 from typing import List, Optional, Sequence
 
 from .agents import AutoFixAgent, FailureAnalysisAgent, RepairStrategyAgent
@@ -173,13 +174,28 @@ class RepairOrchestrator:
             diagnosis, forced_first = self._initial_diagnosis(failure, record)
             record.diagnosis = diagnosis
 
+        floor = self.config.non_repairable_min_confidence
         if diagnosis.root_cause in NON_REPAIRABLE:
-            record.skipped_reason = (
-                f"not repairable by editing the test: {diagnosis.root_cause.value}"
-                f" -- {diagnosis.explanation}"
-            )
-            logger.info("  skipped: %s", record.skipped_reason)
-            return record
+            if not may_skip(diagnosis, floor):
+                # Skipping is permanent -- the test is never attempted and is
+                # then quarantined -- so an unsure verdict must not be allowed
+                # to make it. Try the ladder and let the evidence decide.
+                logger.info(
+                    "  %s at %.2f confidence is below the %.2f floor; "
+                    "repairing anyway",
+                    diagnosis.root_cause.value, diagnosis.confidence, floor,
+                )
+                diagnosis = replace(
+                    diagnosis, root_cause=_fallback_cause(diagnosis)
+                )
+                record.diagnosis = diagnosis
+            else:
+                record.skipped_reason = (
+                    "not repairable by editing the test: "
+                    f"{diagnosis.root_cause.value} -- {diagnosis.explanation}"
+                )
+                logger.info("  skipped: %s", record.skipped_reason)
+                return record
 
         current = failure
         attempted: List[str] = []
@@ -322,3 +338,27 @@ def _cause_from_value(value: str) -> RootCause:
         if cause.value == value:
             return cause
     return RootCause.UNKNOWN
+
+
+def may_skip(diagnosis, floor: float) -> bool:
+    """Is this verdict sure enough to end the repair attempt before it starts?
+
+    Skipping is permanent: the test is never attempted, and is then quarantined
+    out of the suite. A production_bug guess at 0.3 confidence would therefore
+    discard a test the ladder would have fixed, on the strength of the model's
+    own admission that it did not know.
+    """
+    return diagnosis.confidence >= floor
+
+
+def _fallback_cause(diagnosis):
+    """What to try instead when a NON_REPAIRABLE verdict is too unsure to act on.
+
+    The heuristic classifier's second-choice signal is the exception type, and
+    an assertion mismatch is both the commonest real cause and the one whose
+    ladder starts with the cheapest rung, so it is the right thing to fall back
+    to when the model was not confident enough to end the attempt.
+    """
+    from .models import RootCause
+
+    return RootCause.ASSERTION_MISMATCH
