@@ -403,12 +403,18 @@ All three obey the same three rules (`enhance.py` docstring):
 | Field | Default | Meaning |
 |---|---|---|
 | `workspace` | temp dir | Where projects are unpacked and worked on |
-| `model` | `gpt-4o-mini` | Held constant when measuring |
-| `temperature` | `0.0` | Determinism |
-| `max_output_tokens` | `2048` | Per completion |
+| `model` | `gpt-5.6-sol` | Held constant when measuring |
+| `reasoning_effort` | `medium` | Thinking budget. Dropped for models that do not reason |
+| `temperature` | `0.0` | **Requested, not guaranteed.** Reasoning models accept only their default, and the client drops the parameter when one refuses it -- so a GPT-5-family run samples at temperature 1 and is *not* reproducible run to run. `benchmark.json` records the model and effort so a figure can at least be attributed. |
+| `max_output_tokens` | `2048` | Per completion, grown automatically when a reasoning model spends the whole budget thinking |
+| `max_token_ceiling` | `16384` | Upper bound on that growth |
+| `request_timeout_s` | `300.0` | Ceiling on one model call |
+| `mutant_timeout_s` | `120` | Ceiling on one mutant's verdict run |
+| `mutation_budget_s` | `900` | Ceiling on the whole mutation phase |
+| `non_repairable_min_confidence` | `0.6` | A diagnosis below this may not skip a test permanently |
 | `api_key` | from env/.env | `OPENAI_API_KEY`, `.env`, then `OAI_CONFIG_LIST.json` |
 | `base_url` | `None` | For an OpenAI-compatible endpoint |
-| `max_attempts` | `3` | Escalation rungs per test |
+| `max_attempts` | `4` | Escalation rungs per test. Four, not three: the longest ladder is three rungs, so at three the cross-ladder escalation was unreachable |
 | `use_signature_cache` | `True` | Off during benchmarking |
 | `reject_weakened_fixes` | `True` | |
 | `reject_regressions` | `True` | |
@@ -621,8 +627,13 @@ applicability**.
   or a broken environment is correctly declined (`NON_REPAIRABLE`).
 - **The baseline cannot attempt file-scoped failures** — structural, and must be
   reported separately.
-- **Results are model-dependent.** Everything measured used `gpt-4o-mini` at
-  temperature 0.
+- **Results are model-dependent, and no longer bit-reproducible.** The default
+  is `gpt-5.6-sol`, a reasoning model, which accepts only its default
+  temperature -- so `temperature = 0.0` is requested and refused, and two runs
+  of the same command can differ. Quote the model, the reasoning effort and the
+  pinned project commit alongside any number; `benchmark.json` records all
+  three. Figures measured on `gpt-4o-mini` do not carry over to `gpt-5.6-sol`
+  and both arms must be re-run after a model change.
 - **Antivirus TLS interception breaks pip itself**, not only the model client:
   `CERTIFICATE_VERIFY_FAILED` on any install, so no dependencies can be fetched.
   The launcher scripts exist so the project still runs on such a machine.

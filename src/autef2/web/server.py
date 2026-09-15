@@ -198,11 +198,34 @@ def _config(session: Session):
 
 
 def _llm(session: Session, config):
+    """The session's model client, rebuilt when the settings that shape it change.
+
+    The client was cached for the life of the session, which made the Model and
+    Thinking-effort dropdowns a lie after the first stage that used them: later
+    stages went on calling -- and billing -- the original model while the page
+    showed the new one. Anyone comparing two models from the UI got one model
+    twice unless they hit Reset, which throws the run away.
+
+    The running tally is carried across, since it is the tally for this session
+    and not for one model.
+    """
     from ..llm import LLMClient
 
-    if "llm" not in session.state:
-        session.state["llm"] = LLMClient(config)
-    return session.state["llm"]
+    signature = (config.model, config.reasoning_effort, config.base_url)
+    existing = session.state.get("llm")
+    if existing is not None and session.state.get("llm_signature") == signature:
+        return existing
+
+    client = LLMClient(config)
+    if existing is not None:
+        client.usage.merge(existing.usage)
+        logger.info(
+            "Model settings changed to %s (%s); later stages use it",
+            config.model, config.reasoning_effort or "no thinking effort",
+        )
+    session.state["llm"] = client
+    session.state["llm_signature"] = signature
+    return client
 
 
 def _collect_suite(session: Session, config, *, baseline: bool) -> None:

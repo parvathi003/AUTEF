@@ -324,7 +324,8 @@ Then open `http://127.0.0.1:8000` and sign in with `autef` / `autef2025`.
 
 | Control | Type | Default | What it does |
 |---|---|---|---|
-| **Model** | dropdown | `gpt-4o-mini` | Which AI model to use. Held constant when measuring, so a v1-vs-v2 difference is never just "one used a better model". |
+| **Model** | dropdown | `gpt-5.6-sol` | Which AI model to use. Held constant when measuring, so a v1-vs-v2 difference is never just "one used a better model". Changing it mid-session rebuilds the client, so later stages use what the dropdown says. |
+| **Thinking effort** | dropdown | `medium` | How hard a reasoning model thinks before answering. Ignored by models that do not reason. |
 | **Escalation rungs per test** | slider, 1–5 | 3 | How many *different* repair strategies to try before giving up on a test. This slider is the v2 contribution made adjustable — set it to 1 and repair behaves much more like v1. |
 | **Isolated virtualenv per project** | checkbox | off | Build a fresh environment and install the project's dependencies. Slow but correct. **Turn it on for any project with third-party imports.** Leave it off for small dependency-free projects to save minutes. |
 | **Reuse strategies for repeated failures** | checkbox | on | The cache. When a failure looks like one already fixed, skip diagnosis and start from the strategy that worked. Faster, but turn it off when measuring. |

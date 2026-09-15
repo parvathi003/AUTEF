@@ -256,11 +256,22 @@ class LLMClient:
         completion = int(getattr(usage, "completion_tokens", 0) or 0)
         pricing = MODEL_PRICING.get(self.config.model)
         if pricing is None:
-            pricing = MODEL_PRICING["gpt-4o-mini"]
-            logger.debug(
-                "No pricing for model %s; costing at gpt-4o-mini rates",
-                self.config.model,
-            )
+            # Warned, not debugged, and once per model rather than per call.
+            # A model with no price entry used to be costed at the cheapest
+            # rate in the table behind a log line nobody would ever see, which
+            # is how a cost-per-fix figure ends up an order of magnitude out.
+            fallback = max(MODEL_PRICING.values(), key=lambda p: p["output"])
+            pricing = fallback
+            if self.config.model not in _PRICING_WARNED:
+                _PRICING_WARNED.add(self.config.model)
+                logger.warning(
+                    "No pricing is configured for %s. Costs are estimated at "
+                    "the most expensive known rate ($%.2f/$%.2f per million) "
+                    "and should not be quoted as measured.",
+                    self.config.model,
+                    fallback["input"] * 1_000_000,
+                    fallback["output"] * 1_000_000,
+                )
         cost = prompt * pricing["input"] + completion * pricing["output"]
 
         self.usage.add(prompt, completion, cost)
@@ -279,6 +290,10 @@ _QUIRKS: Dict[str, set] = {}
 #: Token budgets a model has proven it needs, keyed by model name. A reasoning
 #: model can spend an entire small budget thinking and return nothing at all.
 _MIN_BUDGET: Dict[str, int] = {}
+
+#: Models already warned about for having no price entry, so the warning is
+#: issued once rather than on every call.
+_PRICING_WARNED: set = set()
 
 
 def _learn_quirk(model: str, exc: Exception) -> bool:

@@ -923,3 +923,72 @@ def test_no_enhancement_table_when_nothing_was_measured():
     from autef2.models import RunReport
 
     assert _enhancement_section({"autef2": [RunReport(project="x")]}) == []
+
+
+def test_changing_the_model_rebuilds_the_client():
+    """The dropdown was a lie after the first stage that used the model.
+
+    The client was cached for the life of the session, so later stages went on
+    calling -- and billing -- the original model while the page showed the new
+    one. Anyone comparing two models from the UI got one model twice.
+    """
+    from autef2.web.server import Session, _config, _llm
+
+    session = Session("demo")
+    session.settings["model"] = "gpt-4o-mini"
+    first = _llm(session, _config(session))
+    first.usage.add(10, 5, 0.01)
+
+    again = _llm(session, _config(session))
+    assert again is first, "an unchanged setting must not rebuild the client"
+
+    session.settings["model"] = "gpt-5.6-sol"
+    second = _llm(session, _config(session))
+
+    assert second is not first, "the model changed and the client did not"
+    assert second.config.model == "gpt-5.6-sol"
+    # The tally belongs to the session, not to one model.
+    assert second.usage.prompt_tokens == 10 and second.usage.cost_usd == 0.01
+
+    session.settings["reasoning_effort"] = "high"
+    third = _llm(session, _config(session))
+    assert third is not second, "effort changed and the client did not"
+
+
+def test_an_unpriced_model_warns_once_and_costs_at_the_dearest_rate(caplog):
+    """A missing price entry used to bill at the cheapest rate in the table.
+
+    Behind a debug line nobody would see, which is how a cost-per-fix figure
+    ends up an order of magnitude out.
+    """
+    import logging
+
+    from autef2.config import MODEL_PRICING
+    from autef2.llm import _PRICING_WARNED
+
+    _PRICING_WARNED.discard("some-unreleased-model")
+    dearest = max(MODEL_PRICING.values(), key=lambda p: p["output"])
+    cheapest = min(MODEL_PRICING.values(), key=lambda p: p["output"])
+    assert dearest["output"] > cheapest["output"], "the table must have a spread"
+
+    class _Usage:
+        prompt_tokens = 1000
+        completion_tokens = 1000
+
+    class _Response:
+        usage = _Usage()
+
+    from autef2.config import AutefConfig
+    from autef2.llm import LLMClient, Usage
+
+    client = LLMClient.__new__(LLMClient)
+    client.config = AutefConfig(model="some-unreleased-model", api_key="x")
+    client.usage = Usage()
+    client._parent = None
+
+    with caplog.at_level(logging.WARNING):
+        client._record(_Response())
+
+    assert "No pricing is configured" in caplog.text
+    assert client.usage.cost_usd == 1000 * dearest["input"] + 1000 * dearest["output"]
+    _PRICING_WARNED.discard("some-unreleased-model")

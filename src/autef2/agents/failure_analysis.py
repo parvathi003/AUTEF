@@ -111,6 +111,42 @@ _TYPE_RULES = {
 }
 
 
+def _provenance_note(failure: TestFailure) -> str:
+    """Tell the diagnoser whose test this is.
+
+    The answer changes the prior completely and the model could not see it.
+    A test the project's authors wrote and maintained encodes intended
+    behaviour, so production_bug is worth real consideration. A test this
+    framework generated minutes ago from reading the source is an unreviewed
+    guess, and "the source is wrong" is far more likely to mean "my guess was
+    wrong" -- yet those were diagnosed identically.
+
+    It costs a file read and no model call: the marker is already written into
+    every generated file.
+    """
+    from pathlib import Path as _Path
+
+    from .generation import authored_here
+
+    if not failure.test_file:
+        return ""
+    if authored_here(_Path(failure.test_file)):
+        return (
+            "PROVENANCE: this test was written by this framework from reading "
+            "the source, and has been reviewed by no one. It is a guess about "
+            "what the code should do, not a statement of intended behaviour. "
+            "Prefer an explanation in which the test is wrong. Reserve "
+            "production_bug for a contradiction the source itself makes "
+            "plain -- a docstring or a sibling function that says otherwise -- "
+            "not merely for the code disagreeing with this test.\n\n"
+        )
+    return (
+        "PROVENANCE: this test was written and maintained by the project's own "
+        "authors, so it carries their intent. If the source contradicts it, "
+        "production_bug is a real possibility.\n\n"
+    )
+
+
 def error_text(failure: TestFailure) -> str:
     """The error itself, without the test source that led up to it.
 
@@ -194,6 +230,7 @@ class FailureAnalysisAgent:
                 "role": "user",
                 "content": (
                     f"{context}\n\n"
+                    f"{_provenance_note(failure)}"
                     f"A static classifier suggests '{heuristic_cause.value}' "
                     f"(confidence {heuristic_confidence:.2f}). Confirm it or "
                     f"correct it based on the evidence above."
