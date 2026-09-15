@@ -103,7 +103,7 @@ class TestRunner:
         """
         args = list(targets) if targets else self._default_targets()
         return self._run(
-            [*args, "-x"], timeout=self.config.single_test_timeout_s * 8
+            [*args, "-x"], timeout=self.config.mutant_timeout_s
         )
 
     def run_file(self, test_file: str) -> SuiteResult:

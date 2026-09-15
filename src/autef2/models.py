@@ -219,6 +219,11 @@ class RepairRecord:
     attempts: List[RepairAttempt] = field(default_factory=list)
     fixed: bool = False
     skipped_reason: Optional[str] = None
+    #: Where the test lives, copied off the resolved failure. Carried here so a
+    #: later pass can act on the test file without re-resolving the node id.
+    test_file: Optional[str] = None
+    test_function: Optional[str] = None
+    test_class: Optional[str] = None
     cache_hit: bool = False
     final_strategy_id: Optional[str] = None
 
@@ -446,6 +451,9 @@ class MutationSnapshot:
     mutants: List[Mutant] = field(default_factory=list)
     error: Optional[str] = None
     duration_s: float = 0.0
+    #: True when scoring stopped early against its time budget, so ``unscored``
+    #: is a reflection of the clock rather than of the mutants.
+    budget_exhausted: bool = False
 
     @property
     def total(self) -> int:
@@ -456,23 +464,43 @@ class MutationSnapshot:
         return sum(1 for m in self.mutants if m.killed)
 
     @property
+    def unscored(self) -> int:
+        """Mutants no verdict was reached on."""
+        return sum(1 for m in self.mutants if m.error)
+
+    @property
+    def scored(self) -> int:
+        return self.total - self.unscored
+
+    @property
     def survived(self) -> int:
-        return self.total - self.killed
+        """Mutants the suite ran against and did not catch.
+
+        A mutant that could not be applied, or that ran out of budget, is not a
+        survivor: nothing was learned about the suite from it. Counting those
+        as survivors understates the score and invents evidence of weakness
+        that was never measured.
+        """
+        return sum(1 for m in self.mutants if not m.killed and not m.error)
 
     @property
     def score(self) -> float:
-        return self.killed / self.total if self.total else 0.0
+        """Killed over *scored*, not over total."""
+        return self.killed / self.scored if self.scored else 0.0
 
     def survivors(self) -> List[Mutant]:
-        return [m for m in self.mutants if not m.killed]
+        return [m for m in self.mutants if not m.killed and not m.error]
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "measured": self.measured,
             "total": self.total,
+            "scored": self.scored,
+            "unscored": self.unscored,
             "killed": self.killed,
             "survived": self.survived,
             "score": round(self.score, 4),
+            "budget_exhausted": self.budget_exhausted,
             "mutants": [m.to_dict() for m in self.mutants],
             "error": self.error,
             "duration_s": round(self.duration_s, 3),
@@ -501,6 +529,15 @@ class RunReport:
     coverage_after: Optional[CoverageSnapshot] = None
     mutation_before: Optional[MutationSnapshot] = None
     mutation_after: Optional[MutationSnapshot] = None
+
+    #: Tests this framework wrote, could not repair, and took back out. Kept
+    #: on the report because a removal the reader cannot see is indistinguishable
+    #: from a test that never existed.
+    quarantined: List[Dict[str, Any]] = field(default_factory=list)
+    #: Why a stage did not run, keyed by stage name. A stage that declines to
+    #: run is not the same as a stage that ran and found nothing, and the
+    #: reader has to be able to tell.
+    stage_skips: Dict[str, str] = field(default_factory=dict)
 
     prompt_tokens: int = 0
     completion_tokens: int = 0

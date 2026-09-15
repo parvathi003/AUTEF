@@ -364,6 +364,11 @@ class MutationOutcome:
     layout: Optional[ProjectLayout] = None
     duration_s: float = 0.0
     skipped_reason: Optional[str] = None
+    #: Tests left out of scoring because they were already failing. A mutation
+    #: score is only meaningful against tests that pass on unmutated source.
+    excluded: List[str] = field(default_factory=list)
+    #: True when the phase stopped early because it ran out of time budget.
+    budget_exhausted: bool = False
 
     @property
     def accepted(self) -> List[GeneratedTest]:
@@ -397,11 +402,27 @@ class MutationPhase:
         self.agent = MutationKillAgent(llm, config, layout)
         self.runner = TestRunner(layout, environment, config)
         self.mutator = Mutator(layout)
+        #: Node ids that pass on unmutated source. Set by ``run`` and used as
+        #: the target list for every mutant, so an already-failing test cannot
+        #: be mistaken for a mutant being caught.
+        self._green: Optional[List[str]] = None
 
     def score(
-        self, *, max_mutants: int = 20, seed: int = 1337
+        self,
+        *,
+        max_mutants: int = 20,
+        seed: int = 1337,
+        budget_s: Optional[float] = None,
     ) -> MutationSnapshot:
-        """Apply mutants one at a time and record which the suite catches."""
+        """Apply mutants one at a time and record which the suite catches.
+
+        ``budget_s`` caps the whole phase. Without it one pathological mutant
+        can absorb the entire run: negating the predicate of a condition
+        variable, say, makes the wait never satisfy, and the mutant sits there
+        until a timeout. A mutant that runs out of budget is recorded as
+        unscored rather than as surviving, because "the tests did not catch it"
+        and "we never found out" are different facts.
+        """
         started = time.time()
         snapshot = MutationSnapshot()
 
@@ -421,8 +442,17 @@ class MutationPhase:
                 snapshot.mutants.append(mutant)
                 continue
 
+            if budget_s is not None and time.time() - started > budget_s:
+                mutant.error = (
+                    "not scored: the mutation phase ran out of its time budget"
+                )
+                snapshot.mutants.append(mutant)
+                self.mutator.restore(site, original)
+                snapshot.budget_exhausted = True
+                continue
+
             try:
-                result = self.runner.run_fail_fast()
+                result = self.runner.run_fail_fast(self._green)
                 mutant.killed = bool(result.failures or result.collection_errors)
                 if mutant.killed:
                     first = (result.failures or result.collection_errors)[0]
@@ -455,10 +485,12 @@ class MutationPhase:
         max_mutants: int = 20,
         max_survivors: int = 5,
         seed: int = 1337,
-        require_green: bool = True,
+        require_green: Optional[bool] = None,
     ) -> MutationOutcome:
         started = time.time()
         outcome = MutationOutcome(layout=self.layout)
+        if require_green is None:
+            require_green = self.config.mutation_requires_green
 
         if require_green:
             baseline = self.runner.run_suite()
@@ -467,19 +499,49 @@ class MutationPhase:
                     "the suite does not run, so mutation testing would measure "
                     "nothing"
                 )
-            elif baseline.failures or baseline.collection_errors:
-                outcome.skipped_reason = (
-                    f"{len(baseline.failures) + len(baseline.collection_errors)} "
-                    "test(s) already fail. A mutation score against a failing "
-                    "suite cannot distinguish 'the tests caught it' from 'the "
-                    "tests were already broken' -- repair the suite first."
-                )
-            if outcome.skipped_reason:
                 logger.warning("Mutation skipped: %s", outcome.skipped_reason)
                 outcome.duration_s = time.time() - started
                 return outcome
 
-        outcome.before = self.score(max_mutants=max_mutants, seed=seed)
+            # A red test cannot distinguish "the tests caught the mutant" from
+            # "that test was already broken", so it must not be scored against.
+            # Refusing the whole stage over it -- which is what this used to do
+            # -- throws away the hundreds of tests that ARE green, and hands the
+            # decision to whichever test happens to be failing. Score the green
+            # subset instead, and say plainly which tests were left out.
+            if baseline.collection_errors:
+                outcome.skipped_reason = (
+                    f"{len(baseline.collection_errors)} test file(s) cannot be "
+                    "collected. A file that does not import cannot be excluded "
+                    "test by test, so no honest subset remains to score."
+                )
+                logger.warning("Mutation skipped: %s", outcome.skipped_reason)
+                outcome.duration_s = time.time() - started
+                return outcome
+
+            if baseline.failures:
+                outcome.excluded = [f.nodeid for f in baseline.failures]
+                logger.warning(
+                    "Scoring against the %d green test(s); excluding %d that "
+                    "already fail",
+                    len(baseline.passed), len(outcome.excluded),
+                )
+            if not baseline.passed:
+                outcome.skipped_reason = (
+                    "no test passes, so there is nothing that could catch a "
+                    "mutant"
+                )
+                logger.warning("Mutation skipped: %s", outcome.skipped_reason)
+                outcome.duration_s = time.time() - started
+                return outcome
+            self._green = list(baseline.passed)
+
+        outcome.before = self.score(
+            max_mutants=max_mutants,
+            seed=seed,
+            budget_s=self.config.mutation_budget_s,
+        )
+        outcome.budget_exhausted = outcome.before.budget_exhausted
         if not outcome.before.measured:
             outcome.skipped_reason = outcome.before.error
             outcome.duration_s = time.time() - started

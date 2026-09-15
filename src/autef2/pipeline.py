@@ -124,7 +124,24 @@ def run_project(
         report.mutation_after = outcome.after
         report.mutation_generated = outcome.records
         layout = outcome.layout or layout
-        if outcome.skipped_reason and report.error is None:
+        if outcome.excluded:
+            report.stage_skips["mutation_excluded"] = (
+                f"{len(outcome.excluded)} already-failing test(s) were left out "
+                "of scoring: " + ", ".join(outcome.excluded[:5])
+                + (" ..." if len(outcome.excluded) > 5 else "")
+            )
+        if outcome.budget_exhausted:
+            report.stage_skips["mutation_budget"] = (
+                "scoring stopped at the phase time budget "
+                f"({config.mutation_budget_s}s); the remaining mutants are "
+                "recorded as unscored, not as survivors"
+            )
+        if outcome.skipped_reason:
+            # A stage that declined to run has to say so somewhere the reader
+            # will look. This used to exist only as a console line, so the
+            # report simply showed nothing for stage 8 and left the reader to
+            # guess whether it had run and found nothing.
+            report.stage_skips["mutation"] = outcome.skipped_reason
             logger.info("mutation phase skipped: %s", outcome.skipped_reason)
 
     report.layout = layout

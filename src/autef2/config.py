@@ -78,6 +78,18 @@ class AutefConfig:
     #: Correct but slow; off for quick local runs, on for the benchmark.
     use_venv: bool = False
     suite_timeout_s: int = 900
+    #: Ceiling for one mutant's verdict run. Must be well under
+    #: ``suite_timeout_s``: the whole point of the fail-fast run is that it is
+    #: the cheap one, and a mutant that hangs -- negating the predicate of a
+    #: condition variable will do it -- otherwise absorbs the entire phase.
+    mutant_timeout_s: int = 120
+    #: Ceiling for the whole mutation phase. Reached, scoring stops and the
+    #: remaining mutants are recorded as unscored rather than as survivors.
+    mutation_budget_s: int = 900
+    #: Score mutants even when some tests already fail, against the subset
+    #: that passes. Turning this off scores against the whole suite, which
+    #: cannot tell a caught mutant from an already-broken test.
+    mutation_requires_green: bool = True
     single_test_timeout_s: int = 120
     install_timeout_s: int = 900
     #: Interpreter used to create project venvs.

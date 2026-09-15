@@ -467,17 +467,65 @@ def test_a_weak_suite_lets_mutants_survive(tmp_path):
     assert snapshot.score < 1.0
 
 
-def test_mutation_refuses_to_score_a_failing_suite(tmp_path):
-    """A score against a failing suite cannot distinguish 'caught it' from
-    'was already broken'."""
+def test_mutation_refuses_to_score_when_nothing_passes(tmp_path):
+    """With no green test there is nothing that could catch a mutant."""
     broken = 'from ops import classify\n\n\ndef test_wrong():\n    assert classify(5) == "enormous"\n'
     config, layout, env = _ready(tmp_path, with_tests=broken)
 
     outcome = MutationPhase(layout, env, config, None).run(max_mutants=4)
 
     assert outcome.skipped_reason is not None
-    assert "already fail" in outcome.skipped_reason
+    assert "no test passes" in outcome.skipped_reason
     assert outcome.before is None
+
+
+def test_mutation_scores_the_green_subset_rather_than_refusing(tmp_path):
+    """One red test must not cost the project its whole mutation stage.
+
+    Refusing outright was the old behaviour, and it handed the decision to
+    whichever test happened to be failing -- including tests this framework had
+    written itself. A failing test still cannot be scored against, because it
+    cannot tell "the tests caught it" from "that one was already broken", so it
+    is excluded by name and the rest of the suite does the work.
+    """
+    mixed = (
+        "from ops import classify, total\n\n\n"
+        "def test_total_is_right():\n    assert total(2, 3) == 5\n\n\n"
+        'def test_wrong():\n    assert classify(5) == "enormous"\n'
+    )
+    config, layout, env = _ready(tmp_path, with_tests=mixed)
+
+    outcome = MutationPhase(layout, env, config, None).run(max_mutants=4)
+
+    assert outcome.skipped_reason is None, "one red test blocked the stage"
+    assert outcome.before is not None and outcome.before.measured
+    assert outcome.excluded, "the failing test was not named as excluded"
+    assert all(n.endswith("test_wrong") for n in outcome.excluded)
+
+
+def test_unscored_mutants_are_not_counted_as_survivors():
+    """"The tests did not catch it" and "we never found out" are different.
+
+    A mutant that could not be applied, or that ran out of the phase budget,
+    says nothing about the suite. Counting it as a survivor understates the
+    score and invents evidence of weakness that was never measured.
+    """
+    from autef2.models import Mutant, MutationSnapshot
+
+    snapshot = MutationSnapshot(measured=True, mutants=[
+        Mutant(file="a.py", lineno=1, operator="==", original="a", mutated="b",
+               killed=True),
+        Mutant(file="a.py", lineno=2, operator="==", original="a", mutated="b",
+               killed=False),
+        Mutant(file="a.py", lineno=3, operator="==", original="a", mutated="b",
+               error="not scored: the mutation phase ran out of its time budget"),
+    ])
+
+    assert snapshot.total == 3
+    assert snapshot.scored == 2 and snapshot.unscored == 1
+    assert snapshot.survived == 1, "an unscored mutant was counted as surviving"
+    assert snapshot.score == 0.5, "the unscored mutant polluted the denominator"
+    assert [m.lineno for m in snapshot.survivors()] == [2]
 
 
 #: One function, one mutable operator, one weak test. Keeping it this small

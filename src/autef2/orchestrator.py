@@ -41,6 +41,7 @@ from .models import (
 )
 from .patcher import find_function
 from .resolver import resolve_all
+from .quarantine import sweep as quarantine_unfixed
 from .runner import TestRunner
 from .strategies import strategy_by_id
 from .venv_manager import Environment
@@ -109,6 +110,18 @@ class RepairOrchestrator:
             record = self.repair(failure, baseline_passing)
             report.records.append(record)
 
+        # Anything this framework wrote and could not fix comes back out before
+        # the suite is re-run, so the project the user is handed is not redder
+        # than the one they gave us, and stage 8 is not gated off by our own
+        # unreviewed guesses. Project-authored failures are never touched.
+        swept = quarantine_unfixed(report.records)
+        if swept.removed:
+            logger.info(
+                "Quarantined %d test(s) this framework could not repair",
+                swept.count,
+            )
+            report.quarantined = [q.to_dict() for q in swept.removed]
+
         logger.info("Re-running the full suite")
         report.after = self.runner.run_suite()
 
@@ -153,6 +166,10 @@ class RepairOrchestrator:
             record = RepairRecord(
                 nodeid=failure.nodeid, signature=failure.signature()
             )
+        record.test_file = record.test_file or failure.test_file
+        record.test_function = record.test_function or failure.test_function
+        record.test_class = record.test_class or failure.test_class
+        if record.diagnosis is None:
             diagnosis, forced_first = self._initial_diagnosis(failure, record)
             record.diagnosis = diagnosis
 
